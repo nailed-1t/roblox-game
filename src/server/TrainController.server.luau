@@ -63,10 +63,29 @@ local function putInTrain(character: Model)
 	hrp.AssemblyLinearVelocity = root:GetVelocityAtPosition(target.Position)
 end
 
+-- The place uses an R6 StarterCharacter; dress it in the player's own avatar.
+local function applyAvatar(player: Player, humanoid: Humanoid)
+	if player.UserId <= 0 then
+		return -- Studio test players have no avatar
+	end
+	local ok, description = pcall(function()
+		return Players:GetHumanoidDescriptionFromUserId(player.UserId)
+	end)
+	if ok and description then
+		pcall(function()
+			humanoid:ApplyDescription(description)
+		end)
+	end
+end
+
 -- Every player starts inside the train when they spawn.
 local function onCharacter(character: Model)
-	character:WaitForChild("Humanoid")
+	local humanoid = character:WaitForChild("Humanoid") :: Humanoid
 	character:WaitForChild("HumanoidRootPart")
+	local player = Players:GetPlayerFromCharacter(character)
+	if player then
+		applyAvatar(player, humanoid)
+	end
 	task.wait(0.2) -- let the character finish loading in
 	if character.Parent then
 		putInTrain(character)
