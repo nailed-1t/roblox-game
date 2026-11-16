@@ -1,17 +1,15 @@
--- Spins the train around the circular track forever, with players standing
--- inside it. The train cars are welded to an invisible Root part at the
--- track's center, which a motorized HingeConstraint turns. The cars have an
--- invisible floor, walls and roof (Train.Interior), so players can walk
--- around inside while real physics carries them along.
+-- Spins the train around the circular track forever.
+-- The train cars are welded to an invisible Root part at the track's center,
+-- which a motorized HingeConstraint turns. Each car has an invisible room
+-- (Train.Interior) that players stand in; real physics carries them along.
+-- Putting players inside the train is handled by the TrainStability script
+-- in StarterCharacterScripts.
 
 local Players = game:GetService("Players")
 
 local train = workspace:WaitForChild("Train")
 local root: BasePart = train:WaitForChild("Root")
 local motor: HingeConstraint = root:WaitForChild("Motor")
-local spawnPoints = train:WaitForChild("SpawnPoints")
-local pad: BasePart = workspace:WaitForChild("BoardTrainPad")
-local prompt: ProximityPrompt = pad:WaitForChild("BoardPrompt")
 
 local DIRECTION = 1 -- flip to -1 to reverse
 
@@ -48,26 +46,12 @@ task.spawn(function()
 	end
 end)
 
--- Put a character inside the train, standing on the floor of a random car.
-local function putInTrain(character: Model)
-	local hrp = character:FindFirstChild("HumanoidRootPart") :: BasePart?
-	local points = spawnPoints:GetChildren()
-	if not hrp or #points == 0 then
-		return
-	end
-	local ref = points[math.random(1, #points)] :: ObjectValue
-	local attachment = ref.Value :: Attachment
-	local target = attachment.WorldCFrame
-	character:PivotTo(target)
-	-- Start moving at the train's speed so the player doesn't slide.
-	hrp.AssemblyLinearVelocity = root:GetVelocityAtPosition(target.Position)
-end
-
 -- The place uses an R6 StarterCharacter; dress it in the player's own avatar.
-local function applyAvatar(player: Player, humanoid: Humanoid)
+local function applyAvatar(player: Player, character: Model)
 	if player.UserId <= 0 then
 		return -- Studio test players have no avatar
 	end
+	local humanoid = character:WaitForChild("Humanoid") :: Humanoid
 	local ok, description = pcall(function()
 		return Players:GetHumanoidDescriptionFromUserId(player.UserId)
 	end)
@@ -78,34 +62,15 @@ local function applyAvatar(player: Player, humanoid: Humanoid)
 	end
 end
 
--- Every player starts inside the train when they spawn.
-local function onCharacter(character: Model)
-	local humanoid = character:WaitForChild("Humanoid") :: Humanoid
-	character:WaitForChild("HumanoidRootPart")
-	local player = Players:GetPlayerFromCharacter(character)
-	if player then
-		applyAvatar(player, humanoid)
-	end
-	task.wait(0.2) -- let the character finish loading in
-	if character.Parent then
-		putInTrain(character)
-	end
-end
-
 local function onPlayer(player: Player)
-	player.CharacterAdded:Connect(onCharacter)
+	player.CharacterAdded:Connect(function(character)
+		applyAvatar(player, character)
+	end)
 	if player.Character then
-		task.spawn(onCharacter, player.Character)
+		task.spawn(applyAvatar, player, player.Character)
 	end
 end
 Players.PlayerAdded:Connect(onPlayer)
 for _, player in ipairs(Players:GetPlayers()) do
 	onPlayer(player)
 end
-
--- Getting back in from outside: use the prompt on the orange pad.
-prompt.Triggered:Connect(function(player)
-	if player.Character then
-		putInTrain(player.Character)
-	end
-end)
