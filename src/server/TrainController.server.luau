@@ -1,72 +1,92 @@
--- Spins the train around the circular track and lets players ride it.
--- The train cars are welded to an invisible Root part at the track's center,
--- which a motorized HingeConstraint turns. Because it's real physics,
--- seated players are carried smoothly with the train.
+-- Spins the train around the circular track forever, with players standing
+-- inside it. The train cars are welded to an invisible Root part at the
+-- track's center, which a motorized HingeConstraint turns. The cars have an
+-- invisible floor, walls and roof (Train.Interior), so players can walk
+-- around inside while real physics carries them along.
+
+local Players = game:GetService("Players")
 
 local train = workspace:WaitForChild("Train")
 local root: BasePart = train:WaitForChild("Root")
 local motor: HingeConstraint = root:WaitForChild("Motor")
-local seats = train:WaitForChild("Seats")
+local spawnPoints = train:WaitForChild("SpawnPoints")
 local pad: BasePart = workspace:WaitForChild("BoardTrainPad")
 local prompt: ProximityPrompt = pad:WaitForChild("BoardPrompt")
 
-local TRACK_RADIUS = 105 -- studs from the center to the cars
 local DIRECTION = 1 -- flip to -1 to reverse
 
--- The server simulates the train so every player sees the same thing.
-root:SetNetworkOwner(nil)
+-- Distance from the center of the track to the cars, measured from the model.
+local function trackRadius(): number
+	local rel = train:WaitForChild("head").Position - root.Position
+	return Vector3.new(rel.X, 0, rel.Z).Magnitude
+end
+local TRACK_RADIUS = trackRadius()
+
+local function targetAngularSpeed(): number
+	local speed = train:GetAttribute("Speed") or 30 -- studs per second
+	return DIRECTION * speed / TRACK_RADIUS
+end
 
 local function applySpeed()
-	local speed = train:GetAttribute("Speed") or 20 -- studs per second
-	motor.AngularVelocity = DIRECTION * speed / TRACK_RADIUS
+	motor.MotorMaxTorque = math.huge
+	motor.AngularVelocity = targetAngularSpeed()
 end
 applySpeed()
 train:GetAttributeChangedSignal("Speed"):Connect(applySpeed)
 
--- Boarding: use the prompt on the orange pad to get a free seat.
-local function findFreeSeat(): Seat?
-	for _, seat in ipairs(seats:GetChildren()) do
-		if seat:IsA("Seat") and seat.Occupant == nil then
-			return seat
+-- Keep it running forever: the server always owns the train's physics, and
+-- if anything ever changes the motor we put it back.
+task.spawn(function()
+	while true do
+		if root:CanSetNetworkOwnership() then
+			root:SetNetworkOwner(nil)
 		end
-	end
-	return nil
-end
-
-prompt.Triggered:Connect(function(player)
-	local character = player.Character
-	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-	if not humanoid or humanoid.Health <= 0 or humanoid.SeatPart then
-		return
-	end
-	local seat = findFreeSeat()
-	if seat then
-		seat:Sit(humanoid)
+		if math.abs(motor.AngularVelocity - targetAngularSpeed()) > 1e-4 then
+			applySpeed()
+		end
+		task.wait(2)
 	end
 end)
 
--- Leaving: when a rider jumps out, put them back on the boarding pad
--- instead of dropping them on the track.
-for _, seat in ipairs(seats:GetChildren()) do
-	if seat:IsA("Seat") then
-		local lastOccupant: Humanoid? = nil
-		seat:GetPropertyChangedSignal("Occupant"):Connect(function()
-			local occupant = seat.Occupant
-			if occupant then
-				lastOccupant = occupant
-				return
-			end
-			local humanoid = lastOccupant
-			lastOccupant = nil
-			if humanoid and humanoid.Parent and humanoid.Health > 0 then
-				local hrp = humanoid.Parent:FindFirstChild("HumanoidRootPart")
-				if hrp then
-					task.defer(function()
-						hrp.AssemblyLinearVelocity = Vector3.zero
-						humanoid.Parent:PivotTo(pad.CFrame + Vector3.new(0, 4, 0))
-					end)
-				end
-			end
-		end)
+-- Put a character inside the train, standing on the floor of a random car.
+local function putInTrain(character: Model)
+	local hrp = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	local points = spawnPoints:GetChildren()
+	if not hrp or #points == 0 then
+		return
+	end
+	local ref = points[math.random(1, #points)] :: ObjectValue
+	local attachment = ref.Value :: Attachment
+	local target = attachment.WorldCFrame
+	character:PivotTo(target)
+	-- Start moving at the train's speed so the player doesn't slide.
+	hrp.AssemblyLinearVelocity = root:GetVelocityAtPosition(target.Position)
+end
+
+-- Every player starts inside the train when they spawn.
+local function onCharacter(character: Model)
+	character:WaitForChild("Humanoid")
+	character:WaitForChild("HumanoidRootPart")
+	task.wait(0.2) -- let the character finish loading in
+	if character.Parent then
+		putInTrain(character)
 	end
 end
+
+local function onPlayer(player: Player)
+	player.CharacterAdded:Connect(onCharacter)
+	if player.Character then
+		task.spawn(onCharacter, player.Character)
+	end
+end
+Players.PlayerAdded:Connect(onPlayer)
+for _, player in ipairs(Players:GetPlayers()) do
+	onPlayer(player)
+end
+
+-- Getting back in from outside: use the prompt on the orange pad.
+prompt.Triggered:Connect(function(player)
+	if player.Character then
+		putInTrain(player.Character)
+	end
+end)
