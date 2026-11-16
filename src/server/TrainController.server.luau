@@ -1,7 +1,7 @@
 -- Spins the train around the circular track forever.
 -- The train cars are welded to an invisible Root part at the track's center,
--- which a motorized HingeConstraint turns. Each car has an invisible room
--- (Train.Interior) that players stand in; real physics carries them along.
+-- which a motorized HingeConstraint turns. Players stand on the cars' real
+-- floors (precise collision); real physics carries them along.
 -- Putting players inside the train is handled by the TrainStability script
 -- in StarterCharacterScripts.
 

@@ -1,7 +1,7 @@
--- Keeps the player inside the moving train and steady on their feet.
+-- Puts the player inside the moving train when they spawn and keeps them
+-- steady on their feet. They can walk out through the open ends of the cars.
 -- Placing the player happens here on their own computer (not on the server),
 -- so they're put exactly where they see the train and never overlap a wall.
-local RunService = game:GetService("RunService")
 
 local character = script.Parent
 local humanoid = character:WaitForChild("Humanoid") :: Humanoid
@@ -15,18 +15,9 @@ humanoid:SetStateEnabled(Enum.HumanoidStateType.PlatformStanding, false)
 
 local train = workspace:WaitForChild("Train")
 local trainRoot = train:WaitForChild("Root") :: BasePart
-local interior = train:WaitForChild("Interior")
 local spawnPoints = train:WaitForChild("SpawnPoints")
 local pad = workspace:WaitForChild("BoardTrainPad")
 local prompt = pad:WaitForChild("BoardPrompt") :: ProximityPrompt
-
-local rayParams = RaycastParams.new()
-rayParams.FilterType = Enum.RaycastFilterType.Include
-rayParams.FilterDescendantsInstances = { interior }
-
-local function isInTrain(): boolean
-	return workspace:Raycast(hrp.Position, Vector3.new(0, -8, 0), rayParams) ~= nil
-end
 
 local function putInTrain()
 	local points = spawnPoints:GetChildren()
@@ -48,20 +39,3 @@ putInTrain()
 
 -- Getting back in from the orange pad.
 prompt.Triggered:Connect(putInTrain)
-
--- If the player ever ends up outside the train (or stuck in its floor),
--- put them back inside.
-local outsideSince: number? = nil
-RunService.Heartbeat:Connect(function()
-	if humanoid.Health <= 0 then
-		return
-	end
-	if isInTrain() then
-		outsideSince = nil
-	elseif not outsideSince then
-		outsideSince = os.clock()
-	elseif os.clock() - outsideSince > 1 then
-		outsideSince = nil
-		putInTrain()
-	end
-end)
