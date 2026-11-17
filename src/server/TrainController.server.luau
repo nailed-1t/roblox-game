@@ -56,11 +56,20 @@ for _, player in ipairs(Players:GetPlayers()) do
 	onPlayer(player)
 end
 
--- The server always owns the train's physics so every player sees the same thing.
+-- The server always owns the train's physics (including the swinging weights
+-- on the strings up to the control line) so every player sees the same thing.
+local strings = train:FindFirstChild("Strings")
 task.spawn(function()
 	while true do
 		if root:CanSetNetworkOwnership() then
 			root:SetNetworkOwner(nil)
+		end
+		if strings then
+			for _, part in ipairs(strings:GetChildren()) do
+				if part:IsA("BasePart") and not part.Anchored and part:CanSetNetworkOwnership() then
+					part:SetNetworkOwner(nil)
+				end
+			end
 		end
 		task.wait(2)
 	end
