@@ -1,6 +1,5 @@
 -- Puts the player inside the moving train when they spawn and keeps them
--- steady on their feet. They can get off and back on (by jumping up into a
--- car) while the train is stopped; force fields block the doorways while it moves.
+-- steady on their feet. They can get off and back on by jumping up into a car.
 -- Placing the player happens here on their own computer (not on the server),
 -- so they're put exactly where they see the train and never overlap a wall.
 local RunService = game:GetService("RunService")
