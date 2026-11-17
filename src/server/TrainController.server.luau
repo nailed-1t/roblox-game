@@ -11,6 +11,10 @@
 --   Stops        number of stops per lap (4 = every quarter)
 --   StopSeconds  how long the train waits at each stop
 --   Acceleration how quickly it speeds up / slows down, studs per second²
+--   FieldWarningSeconds  how long before leaving the force fields switch on
+--
+-- While the train is moving, force fields (Train.ForceFields) block the open
+-- ends of every car so nobody can get on or off. They switch off at stops.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -96,6 +100,18 @@ local function updateTravelled()
 	travelled += -delta * DIRECTION
 end
 
+-- Force fields across the cars' doorways: solid and visible while moving.
+local forceFields = train:WaitForChild("ForceFields")
+local function setForceFields(on: boolean)
+	for _, field in ipairs(forceFields:GetChildren()) do
+		if field:IsA("BasePart") then
+			field.CanCollide = on
+			field.Transparency = if on then 0.4 else 1
+		end
+	end
+	train:SetAttribute("ForceFieldsOn", on)
+end
+
 local function setSpeed(studsPerSecond: number)
 	motor.MotorMaxTorque = math.huge
 	motor.MotorMaxAcceleration = setting("Acceleration", 8) / TRACK_RADIUS
@@ -114,6 +130,7 @@ while true do
 	stationIndex += 1
 	local target = stationIndex * (2 * math.pi / stops)
 
+	setForceFields(true)
 	setSpeed(setting("Speed", 50))
 	local braking = false
 	while true do
@@ -131,7 +148,12 @@ while true do
 		end
 	end
 	setSpeed(0)
+	setForceFields(false)
 
-	task.wait(setting("StopSeconds", 10))
+	-- Wait at the station; the force fields come back on just before leaving.
+	local warning = math.clamp(setting("FieldWarningSeconds", 2), 0, setting("StopSeconds", 10))
+	task.wait(setting("StopSeconds", 10) - warning)
+	setForceFields(true)
+	task.wait(warning)
 	updateTravelled()
 end
