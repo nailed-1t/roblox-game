@@ -65,7 +65,8 @@ toastGui.DisplayOrder = 21
 toastGui.Parent = playerGui
 local toast = Instance.new("TextLabel")
 toast.AnchorPoint = Vector2.new(0.5, 0)
-toast.Position = UDim2.new(0.5, 0, 0, -80)
+toast.Position = UDim2.new(0.5, 0, 0, -140)
+toast.Visible = false -- only shown while a message is up
 toast.Size = UDim2.fromOffset(460, 52)
 toast.BackgroundColor3 = Color3.fromRGB(30, 33, 46)
 toast.BackgroundTransparency = 0.05
@@ -84,10 +85,17 @@ local function showToast(text: string, seconds: number?)
 	toastToken += 1
 	local token = toastToken
 	toast.Text = text
+	toast.Visible = true
 	TweenService:Create(toast, TweenInfo.new(0.3, Enum.EasingStyle.Back), { Position = UDim2.new(0.5, 0, 0, 24) }):Play()
 	task.delay(seconds or 5, function()
 		if toastToken == token then
-			TweenService:Create(toast, TweenInfo.new(0.25), { Position = UDim2.new(0.5, 0, 0, -80) }):Play()
+			local away = TweenService:Create(toast, TweenInfo.new(0.25), { Position = UDim2.new(0.5, 0, 0, -140) })
+			away.Completed:Connect(function()
+				if toastToken == token then
+					toast.Visible = false
+				end
+			end)
+			away:Play()
 		end
 	end)
 end
