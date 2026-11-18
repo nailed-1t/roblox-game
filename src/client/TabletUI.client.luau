@@ -359,9 +359,9 @@ local shopTween: Tween? = nil
 
 local overlay = Instance.new("Frame")
 overlay.Name = "ShopOverlay"
-overlay.AnchorPoint = Vector2.new(0.5, 1)
-overlay.Position = UDim2.new(0.5, 0, 1, -20)
-overlay.Size = UDim2.new(0.9, 0, 0, 230)
+overlay.AnchorPoint = Vector2.new(1, 0.5)
+overlay.Position = UDim2.new(1, -24, 0.5, 0)
+overlay.Size = UDim2.new(0, 380, 0.82, 0) -- right side, leaves the stall in view
 overlay.BackgroundColor3 = Color3.fromRGB(16, 18, 26)
 overlay.BackgroundTransparency = 0.12
 overlay.Visible = false
@@ -384,14 +384,14 @@ local function overlayText(text: string, x: number, y: number, w: number, h: num
 	l.Parent = overlay
 	return l
 end
-overlayText("Shop", 24, 14, 0.5, 30, 26, true)
-overlayText("New items are on the way", 24, 46, 0.5, 18, 15, false, Color3.fromRGB(170, 176, 192))
+overlayText("Shop", 24, 14, 0.9, 30, 26, true)
+overlayText("New items are on the way", 24, 46, 0.9, 18, 15, false, Color3.fromRGB(170, 176, 192))
 
 local backButton = Instance.new("TextButton")
 backButton.Name = "Back"
-backButton.AnchorPoint = Vector2.new(1, 0)
-backButton.Position = UDim2.new(1, -20, 0, 16)
-backButton.Size = UDim2.fromOffset(170, 40)
+backButton.AnchorPoint = Vector2.new(0.5, 1)
+backButton.Position = UDim2.new(0.5, 0, 1, -18)
+backButton.Size = UDim2.new(1, -40, 0, 44)
 backButton.BackgroundColor3 = Color3.fromRGB(64, 132, 255)
 backButton.Text = "‹  Back to tablet"
 backButton.TextSize = 17
@@ -402,18 +402,19 @@ Instance.new("UICorner", backButton).CornerRadius = UDim.new(0, 12)
 
 local cards = Instance.new("ScrollingFrame")
 cards.Name = "Items"
-cards.Position = UDim2.new(0, 20, 0, 78)
-cards.Size = UDim2.new(1, -40, 0, 140)
+cards.Position = UDim2.new(0, 20, 0, 80)
+cards.Size = UDim2.new(1, -40, 1, -150)
 cards.BackgroundTransparency = 1
 cards.BorderSizePixel = 0
 cards.ScrollBarThickness = 4
-cards.ScrollingDirection = Enum.ScrollingDirection.X
-cards.AutomaticCanvasSize = Enum.AutomaticSize.X
+cards.ScrollingDirection = Enum.ScrollingDirection.Y
+cards.AutomaticCanvasSize = Enum.AutomaticSize.Y
 cards.CanvasSize = UDim2.new()
 cards.Parent = overlay
-local cardLayout = Instance.new("UIListLayout")
-cardLayout.FillDirection = Enum.FillDirection.Horizontal
-cardLayout.Padding = UDim.new(0, 12)
+local cardLayout = Instance.new("UIGridLayout")
+cardLayout.CellSize = UDim2.fromOffset(164, 130)
+cardLayout.CellPadding = UDim2.fromOffset(12, 12)
+cardLayout.SortOrder = Enum.SortOrder.LayoutOrder
 cardLayout.Parent = cards
 
 local ShopItems = require(shared:WaitForChild("ShopItems"))
