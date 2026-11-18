@@ -22,13 +22,17 @@ local LOOK_SENSITIVITY = 0.25 -- degrees per pixel of mouse movement
 local player = Players.LocalPlayer
 local camera = workspace.CurrentCamera
 
+-- Roblox's default movement controls, so they can be paused while flying.
+-- (Movement keys are also blocked separately below, so flying still works
+-- even if a place doesn't use the default controls.)
 local controls = nil
 task.spawn(function()
-	local ok, playerModule = pcall(function()
-		return require(player:WaitForChild("PlayerScripts"):WaitForChild("PlayerModule"))
-	end)
-	if ok and playerModule then
-		controls = playerModule:GetControls()
+	local module = player:WaitForChild("PlayerScripts"):WaitForChild("PlayerModule", 15)
+	if module then
+		local ok, playerModule = pcall(require, module)
+		if ok and playerModule then
+			controls = playerModule:GetControls()
+		end
 	end
 end)
 
