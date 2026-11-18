@@ -3,9 +3,18 @@
 --   don't walk around at the same time), or click the arrow pad.
 --   Eat apples to grow; hitting a wall or yourself ends the run.
 --   The game pauses by itself when you leave the app or put the tablet away.
+-- Points (paid by the server, Economy script): 1 per apple, +100 for
+-- filling the whole board. A run is paid when it ends (or when you start a
+-- new one over a paused run).
 
 local RunService = game:GetService("RunService")
 local ContextActionService = game:GetService("ContextActionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local function snakeRemote(): RemoteFunction?
+	local remotes = ReplicatedStorage:FindFirstChild("ShopRemotes")
+	return remotes and remotes:FindFirstChild("Snake") :: RemoteFunction?
+end
 
 local Snake = {}
 Snake.__index = Snake
@@ -235,7 +244,7 @@ function Snake.new(pages: Instance)
 		Position = UDim2.fromScale(0, 0.92),
 		Size = UDim2.fromScale(1, 0.05),
 		TextColor3 = COLORS.sub,
-		Text = "Arrow keys / WASD to steer",
+		Text = "1 point per apple · fill the board: +100",
 		Parent = panel,
 	})
 
@@ -389,9 +398,51 @@ function Snake:reset()
 end
 
 function Snake:start()
+	-- a paused run that's being thrown away still pays for its apples
+	if self.state == "paused" or self.state == "playing" then
+		self:_claim(false)
+	end
 	self:reset()
 	self.state = "playing"
+	self.won = false
+	self.reward = nil
+	self.run = (self.run or 0) + 1
+	self.ticket = nil
+	self.claimed = false
+	local run = self.run
+	task.spawn(function()
+		local r = snakeRemote()
+		local ok, token = pcall(function()
+			return r and r:InvokeServer("start")
+		end)
+		if ok and self.run == run then
+			self.ticket = token
+			if self.state == "over" and not self.claimed then
+				self:_claim(self.won)
+			end
+		end
+	end)
 	self:_refreshPanel()
+end
+
+-- send this run's apples to the server to be paid
+function Snake:_claim(filled: boolean)
+	if self.claimed or not self.ticket then
+		return -- ticket still coming: claimed when it arrives
+	end
+	self.claimed = true
+	local token, apples, run = self.ticket, self.eaten, self.run
+	self.ticket = nil
+	task.spawn(function()
+		local r = snakeRemote()
+		local ok, gained = pcall(function()
+			return r and r:InvokeServer("finish", token, apples, filled)
+		end)
+		if self.run == run then
+			self.reward = if ok and type(gained) == "number" then gained else 0
+			self:_refreshPanel()
+		end
+	end)
 end
 
 function Snake:pause()
@@ -465,12 +516,16 @@ function Snake:_step()
 	table.insert(self.body, 1, head)
 	if grows then
 		self.eaten += 1
-		self.score += 10
+		self.score += 1
 		self:_placeApple()
 		if not self.food then
 			-- filled the whole board
 			self.state = "over"
 			self.won = true
+			if self.score > self.best then
+				self.best = self.score
+			end
+			self:_claim(true)
 		end
 	else
 		table.remove(self.body)
@@ -485,6 +540,7 @@ function Snake:_die()
 	if self.score > self.best then
 		self.best = self.score
 	end
+	self:_claim(false)
 	self:_draw()
 	self:_refreshPanel()
 end
@@ -556,7 +612,11 @@ function Snake:_refreshPanel()
 	elseif s == "over" then
 		self.banner.Text = if self.won then "You filled the board!" else "Game over"
 		self.banner.TextColor3 = if self.won then COLORS.green else COLORS.red
-		self.statusLabel.Text = string.format("Length %d · Score %d", #self.body, self.score)
+		if self.reward and self.reward > 0 then
+			self.statusLabel.Text = string.format("Score %d · +%d points", self.score, self.reward)
+		else
+			self.statusLabel.Text = string.format("Length %d · Score %d", #self.body, self.score)
+		end
 		self.statusLabel.TextColor3 = if self.won then COLORS.green else COLORS.red
 	else
 		self.banner.Text = ""
