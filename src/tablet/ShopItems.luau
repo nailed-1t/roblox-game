@@ -10,7 +10,7 @@ return {
 	{
 		id = "ardor",
 		name = "Ardor Scream",
-		price = 50,
+		price = 30,
 		icon = "😱",
 		key = "Z",
 		cooldown = 20,
@@ -19,7 +19,7 @@ return {
 	{
 		id = "headswap",
 		name = "Head Swap",
-		price = 80,
+		price = 15,
 		icon = "🔄",
 		key = "X",
 		cooldown = 90,
