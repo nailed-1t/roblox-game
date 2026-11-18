@@ -8,6 +8,8 @@ local TweenService = game:GetService("TweenService")
 local shared = ReplicatedStorage:WaitForChild("TabletShared")
 local PieceArt = require(shared:WaitForChild("PieceArt"))
 local ShopItems = require(shared:WaitForChild("ShopItems"))
+local TabletArt = require(shared:WaitForChild("TabletArt"))
+local Minesweeper = require(shared:WaitForChild("Minesweeper"))
 
 local TabletView = {}
 TabletView.__index = TabletView
@@ -198,6 +200,7 @@ function TabletView.new(parent: Instance, options: { fullscreen: boolean? }?)
 		home = self:_buildHome(pages),
 		chess = self:_buildChess(pages),
 		shop = self:_buildShop(pages),
+		mines = Minesweeper.new(pages).page,
 	}
 
 	self:_buildHomeIndicator(screen)
@@ -261,7 +264,23 @@ function TabletView:_buildStatusBar(screen: Frame)
 	}, { corner(UDim.new(0.2, 0)) })
 end
 
-local function appIcon(parent: Instance, name: string, colors: { Color3 }, glyph: string?, piece: string?, order: number): TextButton
+-- puts a drawn app icon (from the art sheet) on a button; false if no sheet
+local function iconArt(button: GuiButton, art: string?): boolean
+	local img = art and TabletArt.image(art)
+	if not img then
+		return false
+	end
+	button.BackgroundTransparency = 1
+	local grad = button:FindFirstChildOfClass("UIGradient")
+	if grad then
+		grad:Destroy()
+	end
+	img.Size = UDim2.fromScale(1, 1)
+	img.Parent = button
+	return true
+end
+
+local function appIcon(parent: Instance, name: string, colors: { Color3 }, glyph: string?, piece: string?, order: number, art: string?): TextButton
 	local holder = new("Frame", {
 		Name = name,
 		BackgroundTransparency = 1,
@@ -287,12 +306,14 @@ local function appIcon(parent: Instance, name: string, colors: { Color3 }, glyph
 			Color = ColorSequence.new(colors[1], colors[2]),
 		}),
 	})
-	if piece then
-		local art = PieceArt.make(piece)
-		art.Size = UDim2.fromScale(0.72, 0.72)
-		art.AnchorPoint = Vector2.new(0.5, 0.5)
-		art.Position = UDim2.fromScale(0.5, 0.5)
-		art.Parent = icon
+	if iconArt(icon, art) then
+		-- drawn icon
+	elseif piece then
+		local pieceArt = PieceArt.make(piece)
+		pieceArt.Size = UDim2.fromScale(0.72, 0.72)
+		pieceArt.AnchorPoint = Vector2.new(0.5, 0.5)
+		pieceArt.Position = UDim2.fromScale(0.5, 0.5)
+		pieceArt.Parent = icon
 	elseif glyph then
 		label({
 			Size = UDim2.fromScale(0.6, 0.6),
@@ -372,13 +393,17 @@ function TabletView:_buildHome(pages: Frame): Frame
 			SortOrder = Enum.SortOrder.LayoutOrder,
 		}),
 	})
-	local chessIcon = appIcon(grid, "Chess", { Color3.fromRGB(196, 148, 92), Color3.fromRGB(120, 78, 40) }, nil, "wN", 1)
-	local shopIcon = appIcon(grid, "Shop", { Color3.fromRGB(255, 159, 67), Color3.fromRGB(238, 82, 120) }, "🛍️", nil, 2)
+	local chessIcon = appIcon(grid, "Chess", { Color3.fromRGB(196, 148, 92), Color3.fromRGB(120, 78, 40) }, nil, "wN", 1, "appChess")
+	local shopIcon = appIcon(grid, "Shop", { Color3.fromRGB(255, 159, 67), Color3.fromRGB(238, 82, 120) }, "🛍️", nil, 2, "appShop")
+	local minesIcon = appIcon(grid, "Minesweeper", { Color3.fromRGB(96, 110, 150), Color3.fromRGB(40, 46, 70) }, "💣", nil, 3, "appMines")
 	chessIcon.Activated:Connect(function()
 		self:_fire("openApp", "chess")
 	end)
 	shopIcon.Activated:Connect(function()
 		self:_fire("openApp", "shop")
+	end)
+	minesIcon.Activated:Connect(function()
+		self:_fire("openApp", "mines")
 	end)
 
 	-- dock
@@ -386,7 +411,7 @@ function TabletView:_buildHome(pages: Frame): Frame
 		Name = "Dock",
 		AnchorPoint = Vector2.new(0.5, 1),
 		Position = UDim2.fromScale(0.5, 0.95),
-		Size = UDim2.fromScale(0.3, 0.22),
+		Size = UDim2.fromScale(0.4, 0.22),
 		BackgroundColor3 = Color3.new(1, 1, 1),
 		BackgroundTransparency = 0.82,
 		Parent = home,
@@ -401,8 +426,9 @@ function TabletView:_buildHome(pages: Frame): Frame
 		}),
 	})
 	for i, info in ipairs({
-		{ "chess", { Color3.fromRGB(196, 148, 92), Color3.fromRGB(120, 78, 40) }, nil, "wN" },
-		{ "shop", { Color3.fromRGB(255, 159, 67), Color3.fromRGB(238, 82, 120) }, "🛍️", nil },
+		{ "chess", { Color3.fromRGB(196, 148, 92), Color3.fromRGB(120, 78, 40) }, nil, "wN", "appChess" },
+		{ "shop", { Color3.fromRGB(255, 159, 67), Color3.fromRGB(238, 82, 120) }, "🛍️", nil, "appShop" },
+		{ "mines", { Color3.fromRGB(96, 110, 150), Color3.fromRGB(40, 46, 70) }, "💣", nil, "appMines" },
 	}) do
 		local b = new("TextButton", {
 			Name = info[1],
@@ -410,14 +436,16 @@ function TabletView:_buildHome(pages: Frame): Frame
 			LayoutOrder = i,
 			BackgroundColor3 = Color3.new(1, 1, 1),
 			BorderSizePixel = 0,
-			Size = UDim2.fromScale(0.3, 0.75),
+			Size = UDim2.fromScale(0.24, 0.75),
 			Parent = dock,
 		}, {
 			new("UIAspectRatioConstraint", { AspectRatio = 1 }),
 			corner(UDim.new(0.24, 0)),
 			new("UIGradient", { Rotation = 90, Color = ColorSequence.new(info[2][1], info[2][2]) }),
 		})
-		if info[4] then
+		if iconArt(b, info[5]) then
+			-- drawn icon
+		elseif info[4] then
 			local art = PieceArt.make(info[4])
 			art.Size = UDim2.fromScale(0.72, 0.72)
 			art.AnchorPoint = Vector2.new(0.5, 0.5)
