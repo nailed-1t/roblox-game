@@ -1,6 +1,8 @@
--- Hangs the pictures on the train's canvases (Train.Canvases) as a slow
--- slideshow, so all of them get shown. Small (landscape) canvases show one
--- picture, the tall ones show two stacked. The pictures are packed on three
+-- Hangs the pictures on the train's canvases (Train.Canvases): one picture
+-- per canvas. A canvas model's "Picture" attribute picks which one (index in
+-- PICTURES below); canvases without it get the pictures nobody has picked.
+-- If there are ever more pictures than canvases, the canvases slowly cycle
+-- so every picture still gets shown. The pictures are packed on three
 -- uploaded sheets (assets/canvas-*.png in the repo).
 
 local TweenService = game:GetService("TweenService")
@@ -35,8 +37,6 @@ local canvases = train:WaitForChild("Canvases")
 local pivot = workspace:WaitForChild("TrainPivot") :: BasePart
 local TRACK_RADIUS = 425.9
 
-local slots = {} -- ImageLabels, in order
-
 local function show(img: ImageLabel, index: number)
 	local p = PICTURES[(index - 1) % #PICTURES + 1]
 	img.Image = SHEETS[p.sheet]
@@ -44,7 +44,7 @@ local function show(img: ImageLabel, index: number)
 	img.ImageRectSize = Vector2.new(p.w, p.h)
 end
 
-local function setup(canvas: BasePart)
+local function setup(canvas: BasePart): ImageLabel
 	local old = canvas:FindFirstChild("Picture")
 	if old then
 		old:Destroy()
@@ -63,11 +63,12 @@ local function setup(canvas: BasePart)
 	gui.Brightness = 1
 	gui.ClipsDescendants = true
 
-	-- the surface's own "up" runs sideways on these meshes, so turn the
-	-- picture holder to stand upright: world up is the part's look axis
-	local up = Vector3.yAxis
-	local width = canvas.Size.Y * PIXELS_PER_STUD -- across the wall
-	local height = canvas.Size.Z * PIXELS_PER_STUD -- up the wall
+	-- work out which of the part's axes runs up the wall, then turn the
+	-- picture so it stands upright
+	local cf = canvas.CFrame
+	local yUp = math.abs(cf.UpVector.Y) > math.abs(cf.LookVector.Y)
+	local width = (if yUp then canvas.Size.Z else canvas.Size.Y) * PIXELS_PER_STUD
+	local height = (if yUp then canvas.Size.Y else canvas.Size.Z) * PIXELS_PER_STUD
 	local holder = Instance.new("Frame")
 	holder.Name = "Holder"
 	holder.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -75,53 +76,69 @@ local function setup(canvas: BasePart)
 	holder.Size = UDim2.fromOffset(width, height)
 	holder.BackgroundColor3 = MAT
 	holder.BorderSizePixel = 0
-	local lookUp = canvas.CFrame.LookVector:Dot(up)
 	local sideSign = if face == Enum.NormalId.Right then 1 else -1
-	holder.Rotation = if lookUp * sideSign > 0 then 90 else -90
+	if yUp then
+		holder.Rotation = if cf.UpVector.Y > 0 then 0 else 180
+	else
+		holder.Rotation = if cf.LookVector.Y * sideSign > 0 then 90 else -90
+	end
 	holder.Parent = gui
 
-	local tall = height > width * 1.2
-	local count = if tall then 2 else 1
-	for i = 1, count do
-		local img = Instance.new("ImageLabel")
-		img.Name = "Slot" .. i
-		img.BackgroundTransparency = 1
-		img.ScaleType = Enum.ScaleType.Fit
-		img.AnchorPoint = Vector2.new(0.5, 0.5)
-		if tall then
-			img.Position = UDim2.fromScale(0.5, if i == 1 then 0.27 else 0.73)
-			img.Size = UDim2.fromScale(0.94, 0.44)
-		else
-			img.Position = UDim2.fromScale(0.5, 0.5)
-			img.Size = UDim2.fromScale(0.96, 0.94)
-		end
-		img.Parent = holder
-		table.insert(slots, img)
-	end
+	local img = Instance.new("ImageLabel")
+	img.Name = "Image"
+	img.BackgroundTransparency = 1
+	img.ScaleType = Enum.ScaleType.Fit
+	img.AnchorPoint = Vector2.new(0.5, 0.5)
+	img.Position = UDim2.fromScale(0.5, 0.5)
+	img.Size = UDim2.fromScale(0.96, 0.94)
+	img.Parent = holder
 	gui.Parent = canvas
+	return img
 end
 
+-- give every canvas a picture
+local slots = {}
+local taken = {}
+local unpicked = {}
 for _, model in ipairs(canvases:GetChildren()) do
 	local canvas = model:FindFirstChild("Canvas")
 	if canvas and canvas:IsA("BasePart") then
-		setup(canvas)
+		local img = setup(canvas)
+		local pick = model:GetAttribute("Picture")
+		if typeof(pick) == "number" and PICTURES[pick] and not taken[pick] then
+			taken[pick] = true
+			table.insert(slots, { img = img, index = pick })
+		else
+			table.insert(unpicked, img)
+		end
 	end
 end
-
--- every slot starts on a different picture, then they all move along together
-local step = 0
-for i, img in ipairs(slots) do
-	show(img, i)
+local nextFree = 1
+for _, img in ipairs(unpicked) do
+	while taken[nextFree] and nextFree <= #PICTURES do
+		nextFree += 1
+	end
+	local index = if nextFree <= #PICTURES then nextFree else (#slots % #PICTURES) + 1
+	taken[index] = true
+	table.insert(slots, { img = img, index = index })
 end
-while true do
-	task.wait(SECONDS_PER_PICTURE)
-	step += 1
-	for i, img in ipairs(slots) do
-		local out = TweenService:Create(img, TweenInfo.new(FADE / 2), { ImageTransparency = 1 })
-		out.Completed:Connect(function()
-			show(img, i + step * #slots)
-			TweenService:Create(img, TweenInfo.new(FADE / 2), { ImageTransparency = 0 }):Play()
-		end)
-		out:Play()
+for _, slot in ipairs(slots) do
+	show(slot.img, slot.index)
+end
+
+-- more pictures than canvases: cycle slowly so all of them get a turn
+if #slots > 0 and #slots < #PICTURES then
+	local step = 0
+	while true do
+		task.wait(SECONDS_PER_PICTURE)
+		step += 1
+		for _, slot in ipairs(slots) do
+			local out = TweenService:Create(slot.img, TweenInfo.new(FADE / 2), { ImageTransparency = 1 })
+			out.Completed:Connect(function()
+				show(slot.img, slot.index + step * #slots)
+				TweenService:Create(slot.img, TweenInfo.new(FADE / 2), { ImageTransparency = 0 }):Play()
+			end)
+			out:Play()
+		end
 	end
 end
