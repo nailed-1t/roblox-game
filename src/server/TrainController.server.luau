@@ -128,6 +128,13 @@ while true do
 	while true do
 		RunService.Heartbeat:Wait()
 		updateTravelled()
+		-- Never let anything push the train faster than its cruising speed
+		-- (e.g. a loose part falling on it): snap straight back.
+		local maxSpeed = setting("Speed", 50) * 1.05
+		local spin = root.AssemblyAngularVelocity
+		if spin.Magnitude * TRACK_RADIUS > maxSpeed then
+			root.AssemblyAngularVelocity = spin.Unit * (maxSpeed / TRACK_RADIUS)
+		end
 		local remaining = (target - travelled) * TRACK_RADIUS -- studs
 		local speed = currentSpeed()
 		local brakingDistance = speed * speed / (2 * setting("Acceleration", 8))
@@ -141,6 +148,13 @@ while true do
 	end
 	setSpeed(0)
 
-	task.wait(setting("StopSeconds", 10))
+	-- Wait at the station, holding the train still if anything bumps it.
+	local waitUntil = os.clock() + setting("StopSeconds", 10)
+	while os.clock() < waitUntil do
+		RunService.Heartbeat:Wait()
+		if root.AssemblyAngularVelocity.Magnitude * TRACK_RADIUS > 0.5 then
+			root.AssemblyAngularVelocity = Vector3.zero
+		end
+	end
 	updateTravelled()
 end
