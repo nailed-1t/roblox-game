@@ -5,6 +5,9 @@
     "ReplicatedStorage": {
       "Shared": {
         "$path": "src/shared"
+      },
+      "TabletShared": {
+        "$path": "src/tablet"
       }
     },
     "ServerScriptService": {

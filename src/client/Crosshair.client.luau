@@ -38,7 +38,11 @@ stroke.Parent = dot
 gui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
 
 -- Hide the normal arrow cursor (Roblox's camera scripts can turn it back on,
--- so keep it hidden every frame).
+-- so keep it hidden every frame). While the tablet is open, show the normal
+-- cursor instead so you can tap its buttons.
+local player = Players.LocalPlayer
 RunService.RenderStepped:Connect(function()
-	UserInputService.MouseIconEnabled = false
+	local tabletOpen = player:GetAttribute("TabletOpen") == true
+	UserInputService.MouseIconEnabled = tabletOpen
+	dot.Visible = not tabletOpen
 end)

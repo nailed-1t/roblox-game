@@ -7,8 +7,10 @@ local handle = tool:WaitForChild("Handle") :: BasePart
 
 -- where the tablet sits, relative to the body: right/left, up/down, forward (-)
 local HOLD_OFFSET = Vector3.new(0.5, 0.35, -2.3)
--- the picture is on the handle's -X side, so point +X forward and Y up
+-- the picture is on the handle's -X side, so point +X forward and Y up,
+-- then turn it sideways (landscape) like a tablet being used
 local HOLD_CFRAME = CFrame.fromMatrix(HOLD_OFFSET, Vector3.new(0, 0, -1), Vector3.new(0, 1, 0))
+	* CFrame.Angles(math.rad(90), 0, 0)
 
 local holdWeld: Weld? = nil
 
