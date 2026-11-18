@@ -1,4 +1,4 @@
--- Free-fly camera. Press the key (default ".") to detach the camera from the
+-- Free-fly camera. Press the key (default "L") to detach the camera from the
 -- character and fly it around; the avatar stays where it is and doesn't move.
 -- Press the key again to go back to the normal first-person view.
 --
@@ -14,7 +14,7 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local ContextActionService = game:GetService("ContextActionService")
 
-local TOGGLE_KEY = Enum.KeyCode.Period
+local TOGGLE_KEY = Enum.KeyCode.L
 local SPEED = 60 -- studs per second
 local FAST_MULTIPLIER = 3
 local LOOK_SENSITIVITY = 0.25 -- degrees per pixel of mouse movement
