@@ -1,7 +1,8 @@
--- The Deepwoken Tablet's screen. Opens when the tablet is taken out (M) and
--- closes when it's put away. While it's open the mouse is free so you can
--- tap things. Runs the Chess app (challenges + games against other players,
--- enforced by the server) and the Shop app.
+-- The Deepwoken Tablet's screen. The UI is drawn onto the tablet model's own
+-- screen (the "Display" part inside the tool) while it's held, and the mouse
+-- is freed so you can click on it. Opens with M, closes when put away.
+-- Runs the Chess app (challenges + games against other players, enforced by
+-- the server) and the Shop app, which flies the camera to the shop stall.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -19,6 +20,23 @@ local playerGui = player:WaitForChild("PlayerGui")
 
 ---------------------------------------------------------------- screen
 
+-- the UI itself, drawn on the tablet model's screen
+local surface = Instance.new("SurfaceGui")
+surface.Name = "TabletSurface"
+surface.Face = Enum.NormalId.Front
+surface.SizingMode = Enum.SurfaceGuiSizingMode.FixedSize
+surface.CanvasSize = Vector2.new(800, 496)
+surface.LightInfluence = 0
+surface.Brightness = 1.3
+surface.ResetOnSpawn = false
+surface.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+surface.Enabled = false
+surface.Parent = playerGui
+
+local view = TabletView.new(surface, { fullscreen = true })
+
+-- on-screen layer: frees the mouse while the tablet is out, and holds the
+-- shop overlay
 local gui = Instance.new("ScreenGui")
 gui.Name = "TabletScreen"
 gui.IgnoreGuiInset = true
@@ -36,11 +54,6 @@ unlock.Text = ""
 unlock.BackgroundTransparency = 1
 unlock.Size = UDim2.fromOffset(0, 0)
 unlock.Parent = gui
-
-local view = TabletView.new(gui)
-local OPEN_POS = UDim2.fromScale(0.5, 0.5)
-local CLOSED_POS = UDim2.fromScale(0.5, 1.5)
-view.device.Position = CLOSED_POS
 
 -- small pop-up used when the tablet is put away
 local toastGui = Instance.new("ScreenGui")
@@ -203,27 +216,196 @@ end
 
 ---------------------------------------------------------------- open / close
 
-local function hideOwnTablet(hidden: boolean)
+-- make sure the tablet in your hands is visible to you (first person can hide it)
+local function showOwnTablet()
 	local character = player.Character
 	local tool = character and character:FindFirstChild(TOOL_NAME)
 	if tool then
 		for _, d in ipairs(tool:GetDescendants()) do
-			if d:IsA("BasePart") then
-				d.LocalTransparencyModifier = if hidden then 1 else 0
+			if d:IsA("BasePart") and d.Name ~= "Display" then
+				d.LocalTransparencyModifier = 0
 			end
 		end
 	end
 end
 
+---------------------------------------------------------------- shop (camera)
+
+local camera = workspace.CurrentCamera
+local inShop = false
+local shopTween: Tween? = nil
+
+local overlay = Instance.new("Frame")
+overlay.Name = "ShopOverlay"
+overlay.AnchorPoint = Vector2.new(0.5, 1)
+overlay.Position = UDim2.new(0.5, 0, 1, -20)
+overlay.Size = UDim2.new(0.9, 0, 0, 230)
+overlay.BackgroundColor3 = Color3.fromRGB(16, 18, 26)
+overlay.BackgroundTransparency = 0.12
+overlay.Visible = false
+overlay.Parent = gui
+Instance.new("UICorner", overlay).CornerRadius = UDim.new(0, 18)
+local overlayStroke = Instance.new("UIStroke", overlay)
+overlayStroke.Color = Color3.fromRGB(90, 96, 120)
+overlayStroke.Transparency = 0.4
+
+local function overlayText(text: string, x: number, y: number, w: number, h: number, size: number, bold: boolean, color: Color3?)
+	local l = Instance.new("TextLabel")
+	l.BackgroundTransparency = 1
+	l.Position = UDim2.new(0, x, 0, y)
+	l.Size = UDim2.new(w, 0, 0, h)
+	l.Text = text
+	l.TextSize = size
+	l.TextXAlignment = Enum.TextXAlignment.Left
+	l.TextColor3 = color or Color3.fromRGB(245, 246, 250)
+	l.FontFace = Font.new("rbxasset://fonts/families/GothamSSm.json", if bold then Enum.FontWeight.Bold else Enum.FontWeight.Regular)
+	l.Parent = overlay
+	return l
+end
+overlayText("Shop", 24, 14, 0.5, 30, 26, true)
+overlayText("New items are on the way", 24, 46, 0.5, 18, 15, false, Color3.fromRGB(170, 176, 192))
+
+local backButton = Instance.new("TextButton")
+backButton.Name = "Back"
+backButton.AnchorPoint = Vector2.new(1, 0)
+backButton.Position = UDim2.new(1, -20, 0, 16)
+backButton.Size = UDim2.fromOffset(170, 40)
+backButton.BackgroundColor3 = Color3.fromRGB(64, 132, 255)
+backButton.Text = "‹  Back to tablet"
+backButton.TextSize = 17
+backButton.TextColor3 = Color3.new(1, 1, 1)
+backButton.FontFace = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Bold)
+backButton.Parent = overlay
+Instance.new("UICorner", backButton).CornerRadius = UDim.new(0, 12)
+
+local cards = Instance.new("ScrollingFrame")
+cards.Name = "Items"
+cards.Position = UDim2.new(0, 20, 0, 78)
+cards.Size = UDim2.new(1, -40, 0, 140)
+cards.BackgroundTransparency = 1
+cards.BorderSizePixel = 0
+cards.ScrollBarThickness = 4
+cards.ScrollingDirection = Enum.ScrollingDirection.X
+cards.AutomaticCanvasSize = Enum.AutomaticSize.X
+cards.CanvasSize = UDim2.new()
+cards.Parent = overlay
+local cardLayout = Instance.new("UIListLayout")
+cardLayout.FillDirection = Enum.FillDirection.Horizontal
+cardLayout.Padding = UDim.new(0, 12)
+cardLayout.Parent = cards
+
+local ShopItems = require(shared:WaitForChild("ShopItems"))
+local itemCount = if #ShopItems == 0 then 6 else #ShopItems
+for i = 1, itemCount do
+	local item = ShopItems[i]
+	local card = Instance.new("Frame")
+	card.Name = if item then item.id else ("Soon" .. i)
+	card.LayoutOrder = i
+	card.Size = UDim2.fromOffset(170, 130)
+	card.BackgroundColor3 = Color3.fromRGB(28, 31, 42)
+	card.Parent = cards
+	Instance.new("UICorner", card).CornerRadius = UDim.new(0, 14)
+	local icon = Instance.new("TextLabel")
+	icon.BackgroundTransparency = 1
+	icon.Position = UDim2.fromOffset(0, 8)
+	icon.Size = UDim2.new(1, 0, 0, 56)
+	icon.TextScaled = true
+	icon.Text = if item then (item.icon or "🎁") else "🔒"
+	icon.Parent = card
+	local name = Instance.new("TextLabel")
+	name.BackgroundTransparency = 1
+	name.Position = UDim2.fromOffset(12, 70)
+	name.Size = UDim2.new(1, -24, 0, 22)
+	name.TextSize = 17
+	name.TextXAlignment = Enum.TextXAlignment.Left
+	name.TextColor3 = Color3.fromRGB(245, 246, 250)
+	name.FontFace = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Bold)
+	name.Text = if item then item.name else "Coming soon"
+	name.Parent = card
+	local price = Instance.new("TextLabel")
+	price.BackgroundTransparency = 1
+	price.Position = UDim2.fromOffset(12, 96)
+	price.Size = UDim2.new(1, -24, 0, 18)
+	price.TextSize = 14
+	price.TextXAlignment = Enum.TextXAlignment.Left
+	price.TextColor3 = Color3.fromRGB(170, 176, 192)
+	price.FontFace = Font.new("rbxasset://fonts/families/GothamSSm.json")
+	price.Text = if item then (tostring(item.price) .. " coins") else "Check back later"
+	price.Parent = card
+end
+
+local function shopSpot(): CFrame?
+	local spot = workspace:FindFirstChild("ShopCamera")
+	return if spot and spot:IsA("BasePart") then spot.CFrame else nil
+end
+
+local function enterShop()
+	local target = shopSpot()
+	if inShop or not target then
+		return
+	end
+	inShop = true
+	view:showPage("home")
+	camera.CameraType = Enum.CameraType.Scriptable
+	if shopTween then
+		shopTween:Cancel()
+	end
+	shopTween = TweenService:Create(camera, TweenInfo.new(1.4, Enum.EasingStyle.Quart, Enum.EasingDirection.InOut), { CFrame = target })
+	shopTween:Play()
+	overlay.Visible = true
+end
+
+local function exitShop(instant: boolean?)
+	if not inShop then
+		return
+	end
+	inShop = false
+	overlay.Visible = false
+	if shopTween then
+		shopTween:Cancel()
+	end
+	local head = player.Character and player.Character:FindFirstChild("Head") :: BasePart?
+	local function restore()
+		camera.CameraType = Enum.CameraType.Custom
+		local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			camera.CameraSubject = humanoid
+		end
+	end
+	if instant or not head then
+		restore()
+		return
+	end
+	local back = CFrame.lookAt(head.Position, head.Position + head.CFrame.LookVector)
+	shopTween = TweenService:Create(camera, TweenInfo.new(1.1, Enum.EasingStyle.Quart, Enum.EasingDirection.InOut), { CFrame = back })
+	shopTween:Play()
+	shopTween.Completed:Connect(function(state)
+		if state == Enum.PlaybackState.Completed and not inShop then
+			restore()
+		end
+	end)
+end
+backButton.Activated:Connect(function()
+	exitShop(false)
+end)
+
+---------------------------------------------------------------- open / close
+
 local function open()
 	if isOpen then
 		return
 	end
+	local tool = player.Character and player.Character:FindFirstChild(TOOL_NAME)
+	local display = tool and tool:FindFirstChild("Display")
+	if not display then
+		return
+	end
 	isOpen = true
 	player:SetAttribute("TabletOpen", true)
+	surface.Adornee = display
+	surface.Enabled = true
 	gui.Enabled = true
 	unlock.Visible = true
-	TweenService:Create(view.device, TweenInfo.new(0.35, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), { Position = OPEN_POS }):Play()
 	chessEvent:FireServer("sync")
 	if view.currentPage == "chess" then
 		renderChess()
@@ -236,23 +418,23 @@ local function close()
 	end
 	isOpen = false
 	player:SetAttribute("TabletOpen", false)
+	exitShop(true)
 	unlock.Visible = false
 	view:showPromotion(nil)
 	pendingPromotion = nil
-	local t = TweenService:Create(view.device, TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.In), { Position = CLOSED_POS })
-	t:Play()
-	t.Completed:Connect(function()
-		if not isOpen then
-			gui.Enabled = false
-		end
-	end)
+	surface.Enabled = false
+	surface.Adornee = nil
+	gui.Enabled = false
 end
 
 local function watchCharacter(character: Model)
 	close()
 	character.ChildAdded:Connect(function(child)
 		if child:IsA("Tool") and child.Name == TOOL_NAME then
-			open()
+			child:WaitForChild("Display", 5)
+			if child.Parent == character then
+				open()
+			end
 		end
 	end)
 	character.ChildRemoved:Connect(function(child)
@@ -272,6 +454,10 @@ end
 ---------------------------------------------------------------- view events
 
 view:on("openApp", function(name)
+	if name == "shop" then
+		enterShop()
+		return
+	end
 	view:showPage(name)
 	if name == "chess" then
 		renderChess()
@@ -475,7 +661,7 @@ RunService.RenderStepped:Connect(function()
 	if not isOpen then
 		return
 	end
-	hideOwnTablet(true) -- the screen is the tablet; hide the 3D one in your hands
+	showOwnTablet()
 	local t = now()
 	if t - lastTick < 1 then
 		return

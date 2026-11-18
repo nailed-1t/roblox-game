@@ -112,9 +112,12 @@ end
 
 ---------------------------------------------------------------- construction
 
-function TabletView.new(parent: Instance)
+-- options.fullscreen: fill the parent exactly (for drawing onto the tablet
+-- model's own screen) instead of drawing a device frame around the screen
+function TabletView.new(parent: Instance, options: { fullscreen: boolean? }?)
 	local self = setmetatable({}, TabletView)
 	self.callbacks = {}
+	local fullscreen = options ~= nil and options.fullscreen == true
 
 	-- device body (landscape)
 	local device = new("Frame", {
@@ -130,6 +133,13 @@ function TabletView.new(parent: Instance)
 		stroke(Color3.fromRGB(90, 92, 100), 2, 0.2),
 	})
 	self.device = device
+	if fullscreen then
+		device.Size = UDim2.fromScale(1, 1)
+		device.BackgroundTransparency = 1
+		device:FindFirstChildOfClass("UIAspectRatioConstraint"):Destroy()
+		device:FindFirstChildOfClass("UIStroke"):Destroy()
+		device:FindFirstChildOfClass("UICorner"):Destroy()
+	end
 	-- front camera on the left bezel
 	new("Frame", {
 		Name = "Camera",
@@ -137,6 +147,7 @@ function TabletView.new(parent: Instance)
 		Position = UDim2.fromScale(0.0145, 0.5),
 		Size = UDim2.fromScale(0.008, 0.0125),
 		BackgroundColor3 = Color3.fromRGB(40, 44, 60),
+		Visible = not fullscreen,
 		Parent = device,
 	}, { corner(UDim.new(0.5, 0)) })
 
@@ -150,6 +161,10 @@ function TabletView.new(parent: Instance)
 		Parent = device,
 	}, { corner(UDim.new(0.035, 0)) })
 	self.screen = screen
+	if fullscreen then
+		screen.Size = UDim2.fromScale(1, 1)
+		screen:FindFirstChildOfClass("UICorner").CornerRadius = UDim.new(0.02, 0)
+	end
 
 	-- wallpaper
 	new("Frame", {
