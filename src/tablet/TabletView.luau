@@ -10,6 +10,7 @@ local PieceArt = require(shared:WaitForChild("PieceArt"))
 local ShopItems = require(shared:WaitForChild("ShopItems"))
 local TabletArt = require(shared:WaitForChild("TabletArt"))
 local Minesweeper = require(shared:WaitForChild("Minesweeper"))
+local Snake = require(shared:WaitForChild("Snake"))
 
 local TabletView = {}
 TabletView.__index = TabletView
@@ -201,6 +202,7 @@ function TabletView.new(parent: Instance, options: { fullscreen: boolean? }?)
 		chess = self:_buildChess(pages),
 		shop = self:_buildShop(pages),
 		mines = Minesweeper.new(pages).page,
+		snake = Snake.new(pages).page,
 	}
 
 	self:_buildHomeIndicator(screen)
@@ -396,6 +398,7 @@ function TabletView:_buildHome(pages: Frame): Frame
 	local chessIcon = appIcon(grid, "Chess", { Color3.fromRGB(196, 148, 92), Color3.fromRGB(120, 78, 40) }, nil, "wN", 1, "appChess")
 	local shopIcon = appIcon(grid, "Shop", { Color3.fromRGB(255, 159, 67), Color3.fromRGB(238, 82, 120) }, "🛍️", nil, 2, "appShop")
 	local minesIcon = appIcon(grid, "Minesweeper", { Color3.fromRGB(96, 110, 150), Color3.fromRGB(40, 46, 70) }, "💣", nil, 3, "appMines")
+	local snakeIcon = appIcon(grid, "Snake", { Color3.fromRGB(120, 220, 110), Color3.fromRGB(30, 120, 60) }, "🐍", nil, 4)
 	chessIcon.Activated:Connect(function()
 		self:_fire("openApp", "chess")
 	end)
@@ -404,6 +407,9 @@ function TabletView:_buildHome(pages: Frame): Frame
 	end)
 	minesIcon.Activated:Connect(function()
 		self:_fire("openApp", "mines")
+	end)
+	snakeIcon.Activated:Connect(function()
+		self:_fire("openApp", "snake")
 	end)
 
 	-- dock
