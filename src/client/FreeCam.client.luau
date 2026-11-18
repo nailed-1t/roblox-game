@@ -1,6 +1,6 @@
 -- Free-fly camera. Press the key (default "L") to detach the camera from the
--- character and fly it around; the avatar stays where it is and doesn't move.
--- Press the key again to go back to the normal first-person view.
+-- character and fly it around; the avatar stays where it is (still riding
+-- the train) and doesn't move. Press the key again to go back to first person.
 --
 -- Controls while flying:
 --   Mouse        look around
@@ -22,25 +22,11 @@ local LOOK_SENSITIVITY = 0.25 -- degrees per pixel of mouse movement
 local player = Players.LocalPlayer
 local camera = workspace.CurrentCamera
 
--- Roblox's default movement controls, so they can be paused while flying.
--- (Movement keys are also blocked separately below, so flying still works
--- even if a place doesn't use the default controls.)
-local controls = nil
-task.spawn(function()
-	local module = player:WaitForChild("PlayerScripts"):WaitForChild("PlayerModule", 15)
-	if module then
-		local ok, playerModule = pcall(require, module)
-		if ok and playerModule then
-			controls = playerModule:GetControls()
-		end
-	end
-end)
-
 local flying = false
 local yaw, pitch = 0, 0
 local position = Vector3.zero
 local renderConnection: RBXScriptConnection? = nil
-local savedMouseBehavior = Enum.MouseBehavior.Default
+local savedWalkSpeed, savedJumpHeight = 16, 7.2
 
 local MOVE_KEYS = {
 	[Enum.KeyCode.W] = Vector3.new(0, 0, -1),
@@ -53,13 +39,31 @@ local MOVE_KEYS = {
 	[Enum.KeyCode.LeftControl] = Vector3.new(0, -1, 0),
 }
 
--- While flying, swallow movement keys so they never reach the character.
+local function getHumanoid(): Humanoid?
+	local character = player.Character
+	return character and character:FindFirstChildOfClass("Humanoid")
+end
+
+-- While flying, swallow movement keys so they don't also reach the character.
 local function sinkInput()
 	return Enum.ContextActionResult.Sink
 end
 local sunkKeys = {}
 for key in pairs(MOVE_KEYS) do
 	table.insert(sunkKeys, key)
+end
+
+-- First person hides your own body; show it while the camera is away.
+local function showOwnAvatar()
+	local character = player.Character
+	if not character then
+		return
+	end
+	for _, part in ipairs(character:GetDescendants()) do
+		if part:IsA("BasePart") or part:IsA("Decal") then
+			part.LocalTransparencyModifier = 0
+		end
+	end
 end
 
 local function startFlying()
@@ -69,13 +73,16 @@ local function startFlying()
 	pitch = math.asin(math.clamp(look.Y, -1, 1))
 	position = camera.CFrame.Position
 
-	if controls then
-		controls:Disable()
+	-- freeze the avatar in place (it keeps riding the train)
+	local humanoid = getHumanoid()
+	if humanoid then
+		savedWalkSpeed, savedJumpHeight = humanoid.WalkSpeed, humanoid.JumpHeight
+		humanoid.WalkSpeed = 0
+		humanoid.JumpHeight = 0
 	end
 	ContextActionService:BindActionAtPriority("FreeCamSink", sinkInput, false, Enum.ContextActionPriority.High.Value, table.unpack(sunkKeys))
 
 	camera.CameraType = Enum.CameraType.Scriptable
-	savedMouseBehavior = UserInputService.MouseBehavior
 
 	renderConnection = RunService.RenderStepped:Connect(function(dt)
 		UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
@@ -99,7 +106,9 @@ local function startFlying()
 			local worldMove = horizontal + Vector3.new(0, move.Y, 0)
 			position += worldMove.Unit * speed * dt
 		end
+		camera.CameraType = Enum.CameraType.Scriptable
 		camera.CFrame = CFrame.new(position) * rotation
+		showOwnAvatar()
 	end)
 end
 
@@ -110,27 +119,37 @@ local function stopFlying()
 		renderConnection = nil
 	end
 	ContextActionService:UnbindAction("FreeCamSink")
-	if controls then
-		controls:Enable()
-	end
-	UserInputService.MouseBehavior = savedMouseBehavior
-	camera.CameraType = Enum.CameraType.Custom
-	local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+	local humanoid = getHumanoid()
 	if humanoid then
+		humanoid.WalkSpeed = savedWalkSpeed
+		humanoid.JumpHeight = savedJumpHeight
 		camera.CameraSubject = humanoid
 	end
+	camera.CameraType = Enum.CameraType.Custom
 end
 
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed or input.KeyCode ~= TOGGLE_KEY then
-		return -- ignore the key while typing in chat
-	end
+local function toggle()
 	if flying then
 		stopFlying()
 	else
 		startFlying()
 	end
-end)
+end
+
+-- Listen for the key at high priority so nothing else can swallow it.
+-- (ContextActionService ignores keys typed into chat automatically.)
+ContextActionService:BindActionAtPriority("FreeCamToggle", function(_, state)
+	if state == Enum.UserInputState.Begin then
+		toggle()
+	end
+	return Enum.ContextActionResult.Sink
+end, false, Enum.ContextActionPriority.High.Value + 1, TOGGLE_KEY)
+
+-- Lets other scripts (and tests) switch the free camera too.
+local toggleEvent = Instance.new("BindableEvent")
+toggleEvent.Name = "Toggle"
+toggleEvent.Event:Connect(toggle)
+toggleEvent.Parent = script
 
 -- Respawning while flying puts the camera back on the new character.
 player.CharacterAdded:Connect(function()
