@@ -116,6 +116,17 @@ local function key(cell: Vector2): number
 	return cell.Y * SIZE + cell.X + 1
 end
 
+-- where a square's middle is on the drawing layer (0..1)
+local function at(cell: Vector2, offset: Vector2?): UDim2
+	local o = offset or Vector2.zero
+	return UDim2.fromScale((cell.X + 0.5 + o.X) / SIZE, (cell.Y + 0.5 + o.Y) / SIZE)
+end
+
+-- a size measured in squares
+local function squares(w: number, h: number): UDim2
+	return UDim2.fromScale(w / SIZE, h / SIZE)
+end
+
 ---------------------------------------------------------------- build
 
 function Snake.new(pages: Instance)
@@ -278,6 +289,16 @@ function Snake.new(pages: Instance)
 			self.cells[y * SIZE + x + 1] = cell
 		end
 	end
+	-- the snake and apple are drawn on one layer over the whole grid, so a
+	-- piece can reach into the next square without being covered by it
+	self.layer = new("Frame", {
+		Name = "Layer",
+		BackgroundTransparency = 1,
+		Position = UDim2.fromScale(margin, margin),
+		Size = UDim2.fromScale(1 - 2 * margin, 1 - 2 * margin),
+		ZIndex = 2,
+		Parent = board,
+	})
 
 	-- the pieces drawn on top of the checkerboard
 	local function piece(name: string, color: Color3, radius: number, size: number): Frame
@@ -547,50 +568,122 @@ end
 
 ---------------------------------------------------------------- drawing
 
+-- body width for segment i (head 1): a fat head, a steady body and a
+-- tail that tapers over the last few segments
+local function widthOf(i: number, n: number): number
+	if i == 1 then
+		return 0.9
+	end
+	local fromTail = n - i -- 0 at the tail tip
+	if fromTail < 3 then
+		return 0.56 + 0.08 * fromTail
+	end
+	return 0.8
+end
+
+local function colorOf(i: number, n: number, dead: boolean): Color3
+	if dead then
+		return COLORS.dead:Lerp(Color3.fromRGB(110, 110, 110), (i - 1) / math.max(n - 1, 1))
+	end
+	if i == 1 then
+		return COLORS.head
+	end
+	-- fade from bright near the head to darker at the tail
+	return COLORS.body:Lerp(COLORS.bodyDark, (i - 1) / math.max(n - 1, 1))
+end
+
 function Snake:_draw()
 	local dead = self.state == "over" and not self.won
+	local n = #self.body
+	self.links = self.links or {}
 	for i, c in ipairs(self.body) do
+		local w = widthOf(i, n)
+		local color = colorOf(i, n, dead)
+		-- round blob for this segment
 		local seg = self.segments[i]
 		if not seg then
-			seg = self.piece("Seg" .. i, COLORS.body, 0.3, 0.9)
+			seg = self.piece("Seg" .. i, COLORS.body, 0.5, 0.8)
+			seg.ZIndex = 3
 			self.segments[i] = seg
 		end
-		seg.Parent = self.cells[key(c)]
-		local isHead = i == 1
-		seg.BackgroundColor3 = if dead then COLORS.dead elseif isHead then COLORS.head elseif i % 2 == 0 then COLORS.body else COLORS.bodyDark
-		seg.Size = UDim2.fromScale(if isHead then 0.96 else 0.86, if isHead then 0.96 else 0.86)
+		seg.Parent = self.layer
+		seg.BackgroundColor3 = color
+		seg.Position = at(c)
+		seg.Size = squares(w, w)
+		-- a bridge to the next segment so the body is one smooth tube
+		local nextCell = self.body[i + 1]
+		local link = self.links[i]
+		if nextCell then
+			if not link then
+				link = new("Frame", { Name = "Link" .. i, AnchorPoint = Vector2.new(0.5, 0.5), BorderSizePixel = 0, ZIndex = 2 })
+				self.links[i] = link
+			end
+			local d = nextCell - c
+			local lw = math.min(w, widthOf(i + 1, n))
+			link.Parent = self.layer
+			link.BackgroundColor3 = color:Lerp(colorOf(i + 1, n, dead), 0.5)
+			link.Position = at(c, d * 0.5)
+			link.Size = if d.X ~= 0 then squares(1.02, lw) else squares(lw, 1.02)
+		elseif link then
+			link.Parent = nil
+		end
 		-- eyes on the head, looking the way it moves
+		local isHead = i == 1
 		local eyes = seg:FindFirstChild("Eyes")
 		if isHead then
 			if not eyes then
-				eyes = new("Frame", { Name = "Eyes", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 3, Parent = seg })
-				for _, n in ipairs({ "A", "B" }) do
-					new("Frame", {
-						Name = n,
+				eyes = new("Frame", { Name = "Eyes", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 4, Parent = seg })
+				for _, name in ipairs({ "A", "B" }) do
+					local eye = new("Frame", {
+						Name = name,
 						AnchorPoint = Vector2.new(0.5, 0.5),
-						Size = UDim2.fromScale(0.24, 0.24),
-						BackgroundColor3 = Color3.fromRGB(20, 30, 20),
+						Size = UDim2.fromScale(0.3, 0.3),
+						BackgroundColor3 = Color3.new(1, 1, 1),
 						ZIndex = 4,
 						Parent = eyes,
+					}, { corner(0.5) })
+					new("Frame", {
+						Name = "Pupil",
+						AnchorPoint = Vector2.new(0.5, 0.5),
+						Position = UDim2.fromScale(0.5, 0.5),
+						Size = UDim2.fromScale(0.55, 0.55),
+						BackgroundColor3 = Color3.fromRGB(20, 30, 20),
+						ZIndex = 5,
+						Parent = eye,
 					}, { corner(0.5) })
 				end
 			end
 			eyes.Visible = true
 			local d = self.dir
 			local side = Vector2.new(-d.Y, d.X)
-			local center = Vector2.new(0.5, 0.5) + d * 0.18
-			local a = center + side * 0.2
-			local b = center - side * 0.2
+			local center = Vector2.new(0.5, 0.5) + d * 0.16
+			local a = center + side * 0.22
+			local b = center - side * 0.22
 			eyes.A.Position = UDim2.fromScale(a.X, a.Y)
 			eyes.B.Position = UDim2.fromScale(b.X, b.Y)
+			-- pupils look forward
+			for _, eye in ipairs({ eyes.A, eyes.B }) do
+				eye.Pupil.Position = UDim2.fromScale(0.5 + d.X * 0.18, 0.5 + d.Y * 0.18)
+			end
 		elseif eyes then
 			eyes.Visible = false
 		end
 	end
-	for i = #self.body + 1, #self.segments do
+	for i = n + 1, #self.segments do
 		self.segments[i].Parent = nil
 	end
-	self.apple.Parent = if self.food then self.cells[key(self.food)] else nil
+	for i = n, #self.links do
+		if self.links[i] then
+			self.links[i].Parent = nil
+		end
+	end
+	if self.food then
+		self.apple.Parent = self.layer
+		self.apple.Position = at(self.food)
+		self.apple.Size = squares(0.8, 0.8)
+	else
+		self.apple.Parent = nil
+	end
 end
 
 function Snake:_refreshPanel()
