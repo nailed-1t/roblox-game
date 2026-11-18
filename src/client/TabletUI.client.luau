@@ -1,6 +1,7 @@
--- The Deepwoken Tablet's screen. The UI is drawn onto the tablet model's own
--- screen (the "Display" part inside the tool) while it's held, and the mouse
--- is freed so you can click on it. Opens with M, closes when put away.
+-- The Deepwoken Tablet's screen. When the tablet is taken out (M) a local copy
+-- of the tablet model swings up in front of the camera until it fills ~90% of
+-- the screen, and the UI is drawn on that model's screen part. The mouse is
+-- freed so you can click on it. Putting it away swings it back down.
 -- Runs the Chess app (challenges + games against other players, enforced by
 -- the server) and the Shop app, which flies the camera to the shop stall.
 
@@ -28,6 +29,7 @@ surface.SizingMode = Enum.SurfaceGuiSizingMode.FixedSize
 surface.CanvasSize = Vector2.new(800, 496)
 surface.LightInfluence = 0
 surface.Brightness = 1.3
+surface.AlwaysOnTop = true -- never hidden behind the tablet's own bezel
 surface.ResetOnSpawn = false
 surface.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 surface.Enabled = false
@@ -216,22 +218,142 @@ end
 
 ---------------------------------------------------------------- open / close
 
--- make sure the tablet in your hands is visible to you (first person can hide it)
-local function showOwnTablet()
+---------------------------------------------------------------- the tablet in front of you
+
+local camera = workspace.CurrentCamera
+local SCREEN_FILL = 0.9 -- how much of the screen the tablet covers
+local OPEN_TIME = 0.45
+local CLOSE_TIME = 0.3
+
+local localTablet: Model? = nil -- copy of the tablet that only you see
+local localDisplay: BasePart? = nil
+local offsets = {} -- [part] = CFrame relative to the display
+local tabletCenter = CFrame.new() -- tablet's middle, relative to the display
+local tabletSize = Vector2.new(2, 1.25) -- width/height of the whole tablet (studs)
+local shown = 0 -- 0 = down out of view, 1 = up in front of you
+local showGoal = 0
+local showFrom, showStart, showTime = 0, 0, OPEN_TIME
+
+local function heldTool(): Tool?
 	local character = player.Character
-	local tool = character and character:FindFirstChild(TOOL_NAME)
+	return character and character:FindFirstChild(TOOL_NAME) :: Tool?
+end
+
+-- the held tablet: hidden for you while the big copy is up (others still see it)
+local function setHeldHidden(hidden: boolean)
+	local tool = heldTool()
 	if tool then
 		for _, d in ipairs(tool:GetDescendants()) do
-			if d:IsA("BasePart") and d.Name ~= "Display" then
-				d.LocalTransparencyModifier = 0
+			if d:IsA("BasePart") then
+				d.LocalTransparencyModifier = if hidden then 1 else 0
 			end
 		end
 	end
 end
 
+local function buildLocalTablet(tool: Tool): boolean
+	if localTablet then
+		localTablet:Destroy()
+	end
+	local display = tool:FindFirstChild("Display") :: BasePart?
+	if not display then
+		return false
+	end
+	local model = Instance.new("Model")
+	model.Name = "TabletLocal"
+	offsets = {}
+	local minP, maxP = Vector3.new(math.huge, math.huge, math.huge), -Vector3.new(math.huge, math.huge, math.huge)
+	for _, d in ipairs(tool:GetDescendants()) do
+		if d:IsA("BasePart") then
+			local copy = d:Clone()
+			copy:ClearAllChildren()
+			copy.Anchored = true
+			copy.CanCollide = false
+			copy.CanTouch = false
+			copy.CanQuery = d == display
+			copy.CastShadow = false
+			copy.LocalTransparencyModifier = 0
+			copy.Parent = model
+			local rel = display.CFrame:ToObjectSpace(d.CFrame)
+			offsets[copy] = rel
+			if d == display then
+				localDisplay = copy
+			else
+				-- bounds of the tablet in the display's frame (X = across, Y = up)
+				local half = d.Size / 2
+				for _, sx in ipairs({ -1, 1 }) do
+					for _, sy in ipairs({ -1, 1 }) do
+						for _, sz in ipairs({ -1, 1 }) do
+							local pt = rel * Vector3.new(sx * half.X, sy * half.Y, sz * half.Z)
+							minP = minP:Min(pt)
+							maxP = maxP:Max(pt)
+						end
+					end
+				end
+			end
+		end
+	end
+	if maxP.X > minP.X then
+		local mid = (minP + maxP) / 2
+		tabletCenter = CFrame.new(mid.X, mid.Y, 0)
+		tabletSize = Vector2.new(maxP.X - minP.X, maxP.Y - minP.Y)
+	end
+	model.Parent = camera -- parts under the camera are only drawn for you
+	localTablet = model
+	surface.Adornee = localDisplay
+	return true
+end
+
+local function destroyLocalTablet()
+	if localTablet then
+		localTablet:Destroy()
+	end
+	localTablet, localDisplay = nil, nil
+	offsets = {}
+	surface.Adornee = nil
+end
+
+local function animateTo(goal: number)
+	if showGoal == goal then
+		return
+	end
+	showGoal = goal
+	showFrom = shown
+	showStart = os.clock()
+	showTime = if goal > shown then OPEN_TIME else CLOSE_TIME
+end
+
+-- where the display goes so the whole tablet fills SCREEN_FILL of the view,
+-- facing you; t slides it from below the screen (0) to the middle (1)
+local function placeLocalTablet(t: number)
+	if not localTablet then
+		return
+	end
+	local camCF = camera.CFrame
+	local vp = camera.ViewportSize
+	local tanHalf = math.tan(math.rad(camera.FieldOfView) / 2)
+	local aspect = vp.X / math.max(vp.Y, 1)
+	local distH = tabletSize.Y / (SCREEN_FILL * 2 * tanHalf)
+	local distW = tabletSize.X / (SCREEN_FILL * 2 * tanHalf * aspect)
+	local dist = math.max(distH, distW, 0.6)
+	local viewHeight = 2 * dist * tanHalf
+	local e = TweenService:GetValue(t, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+	local drop = (1 - e) * viewHeight * 1.1
+	local tilt = (1 - e) * math.rad(55)
+	local spin = (1 - e) * math.rad(-12)
+	-- display front faces the camera, display up = camera up, display right = camera left
+	local faceCam = CFrame.fromMatrix(Vector3.zero, -camCF.RightVector, camCF.UpVector)
+	local centerCF = CFrame.new(camCF.Position + camCF.LookVector * dist - camCF.UpVector * drop)
+		* faceCam
+		* CFrame.Angles(-tilt, 0, spin)
+	local displayCF = centerCF * tabletCenter:Inverse()
+	for part, rel in pairs(offsets) do
+		part.CFrame = displayCF * rel
+	end
+end
+
 ---------------------------------------------------------------- shop (camera)
 
-local camera = workspace.CurrentCamera
 local inShop = false
 local shopTween: Tween? = nil
 
@@ -346,6 +468,7 @@ local function enterShop()
 	end
 	inShop = true
 	view:showPage("home")
+	animateTo(0)
 	camera.CameraType = Enum.CameraType.Scriptable
 	if shopTween then
 		shopTween:Cancel()
@@ -376,6 +499,7 @@ local function exitShop(instant: boolean?)
 		restore()
 		return
 	end
+	animateTo(1)
 	local back = CFrame.lookAt(head.Position, head.Position + head.CFrame.LookVector)
 	shopTween = TweenService:Create(camera, TweenInfo.new(1.1, Enum.EasingStyle.Quart, Enum.EasingDirection.InOut), { CFrame = back })
 	shopTween:Play()
@@ -395,14 +519,15 @@ local function open()
 	if isOpen then
 		return
 	end
-	local tool = player.Character and player.Character:FindFirstChild(TOOL_NAME)
-	local display = tool and tool:FindFirstChild("Display")
-	if not display then
+	local tool = heldTool()
+	if not tool or not buildLocalTablet(tool) then
 		return
 	end
 	isOpen = true
 	player:SetAttribute("TabletOpen", true)
-	surface.Adornee = display
+	shown, showGoal = 0, 0
+	placeLocalTablet(0)
+	animateTo(1)
 	surface.Enabled = true
 	gui.Enabled = true
 	unlock.Visible = true
@@ -422,9 +547,8 @@ local function close()
 	unlock.Visible = false
 	view:showPromotion(nil)
 	pendingPromotion = nil
-	surface.Enabled = false
-	surface.Adornee = nil
 	gui.Enabled = false
+	animateTo(0) -- swings down, then the copy is removed (see the render step)
 end
 
 local function watchCharacter(character: Model)
@@ -656,12 +780,33 @@ task.spawn(function()
 	counterLabel = display and display:WaitForChild("Timer", 30)
 end)
 
+-- move the tablet copy right after the camera updates so it never lags
+RunService:BindToRenderStep("TabletLocal", Enum.RenderPriority.Camera.Value + 1, function()
+	if not localTablet then
+		return
+	end
+	if shown ~= showGoal then
+		local a = math.clamp((os.clock() - showStart) / showTime, 0, 1)
+		shown = showFrom + (showGoal - showFrom) * a
+		if a >= 1 then
+			shown = showGoal
+		end
+	end
+	if not isOpen and shown <= 0 then
+		surface.Enabled = false
+		destroyLocalTablet()
+		setHeldHidden(false)
+		return
+	end
+	setHeldHidden(true)
+	placeLocalTablet(shown)
+end)
+
 local lastTick = 0
 RunService.RenderStepped:Connect(function()
 	if not isOpen then
 		return
 	end
-	showOwnTablet()
 	local t = now()
 	if t - lastTick < 1 then
 		return
