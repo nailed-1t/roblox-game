@@ -406,7 +406,6 @@ local function overlayText(text: string, x: number, y: number, w: number, h: num
 	return l
 end
 overlayText("Shop", 24, 14, 0.9, 30, 26, true)
-overlayText("New items are on the way", 24, 46, 0.9, 18, 15, false, Color3.fromRGB(170, 176, 192))
 
 local backButton = Instance.new("TextButton")
 backButton.Name = "Back"
@@ -421,62 +420,9 @@ backButton.FontFace = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.
 backButton.Parent = overlay
 Instance.new("UICorner", backButton).CornerRadius = UDim.new(0, 12)
 
-local cards = Instance.new("ScrollingFrame")
-cards.Name = "Items"
-cards.Position = UDim2.new(0, 20, 0, 80)
-cards.Size = UDim2.new(1, -40, 1, -150)
-cards.BackgroundTransparency = 1
-cards.BorderSizePixel = 0
-cards.ScrollBarThickness = 4
-cards.ScrollingDirection = Enum.ScrollingDirection.Y
-cards.AutomaticCanvasSize = Enum.AutomaticSize.Y
-cards.CanvasSize = UDim2.new()
-cards.Parent = overlay
-local cardLayout = Instance.new("UIGridLayout")
-cardLayout.CellSize = UDim2.fromOffset(164, 130)
-cardLayout.CellPadding = UDim2.fromOffset(12, 12)
-cardLayout.SortOrder = Enum.SortOrder.LayoutOrder
-cardLayout.Parent = cards
-
-local ShopItems = require(shared:WaitForChild("ShopItems"))
-local itemCount = if #ShopItems == 0 then 6 else #ShopItems
-for i = 1, itemCount do
-	local item = ShopItems[i]
-	local card = Instance.new("Frame")
-	card.Name = if item then item.id else ("Soon" .. i)
-	card.LayoutOrder = i
-	card.Size = UDim2.fromOffset(170, 130)
-	card.BackgroundColor3 = Color3.fromRGB(28, 31, 42)
-	card.Parent = cards
-	Instance.new("UICorner", card).CornerRadius = UDim.new(0, 14)
-	local icon = Instance.new("TextLabel")
-	icon.BackgroundTransparency = 1
-	icon.Position = UDim2.fromOffset(0, 8)
-	icon.Size = UDim2.new(1, 0, 0, 56)
-	icon.TextScaled = true
-	icon.Text = if item then (item.icon or "🎁") else "🔒"
-	icon.Parent = card
-	local name = Instance.new("TextLabel")
-	name.BackgroundTransparency = 1
-	name.Position = UDim2.fromOffset(12, 70)
-	name.Size = UDim2.new(1, -24, 0, 22)
-	name.TextSize = 17
-	name.TextXAlignment = Enum.TextXAlignment.Left
-	name.TextColor3 = Color3.fromRGB(245, 246, 250)
-	name.FontFace = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Bold)
-	name.Text = if item then item.name else "Coming soon"
-	name.Parent = card
-	local price = Instance.new("TextLabel")
-	price.BackgroundTransparency = 1
-	price.Position = UDim2.fromOffset(12, 96)
-	price.Size = UDim2.new(1, -24, 0, 18)
-	price.TextSize = 14
-	price.TextXAlignment = Enum.TextXAlignment.Left
-	price.TextColor3 = Color3.fromRGB(170, 176, 192)
-	price.FontFace = Font.new("rbxasset://fonts/families/GothamSSm.json")
-	price.Text = if item then (tostring(item.price) .. " coins") else "Check back later"
-	price.Parent = card
-end
+-- item list, points and clicking the shelf models (see ShopPanel)
+local ShopPanel = require(shared:WaitForChild("ShopPanel"))
+local shopPanel = ShopPanel.new(overlay)
 
 -- the ShopCamera part may not be streamed in, so the server also publishes
 -- its CFrame as a workspace attribute (ShopCameraSync)
@@ -508,6 +454,7 @@ local function enterShop()
 	shopTween = TweenService:Create(camera, TweenInfo.new(1.4, Enum.EasingStyle.Quart, Enum.EasingDirection.InOut), { CFrame = target })
 	shopTween:Play()
 	overlay.Visible = true
+	shopPanel:setActive(true)
 end
 
 local function exitShop(instant: boolean?)
@@ -516,6 +463,7 @@ local function exitShop(instant: boolean?)
 	end
 	inShop = false
 	overlay.Visible = false
+	shopPanel:setActive(false)
 	if shopTween then
 		shopTween:Cancel()
 	end

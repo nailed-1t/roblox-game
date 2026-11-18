@@ -3,6 +3,8 @@
 --   Click a tile to dig, right-click (or turn on Flag mode) to plant a flag.
 --   Clicking a number whose flags are all placed digs the tiles around it.
 --   The first dig is always safe.
+-- Wins earn points (Easy 10, Normal 20, Hard 30), paid by the server
+-- (Economy script) through ShopRemotes.Mines.
 
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -18,10 +20,24 @@ local FONT_BOLD = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.Font
 local FONT_HEAVY = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Heavy)
 
 local LEVELS = {
-	{ key = "easy", name = "Easy", size = 9, mines = 10 },
-	{ key = "medium", name = "Medium", size = 12, mines = 24 },
-	{ key = "hard", name = "Hard", size = 16, mines = 40 },
+	{ key = "easy", name = "Easy", size = 9, mines = 10, points = 10 },
+	{ key = "medium", name = "Normal", size = 12, mines = 24, points = 20 },
+	{ key = "hard", name = "Hard", size = 16, mines = 40, points = 30 },
 }
+
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+
+local function minesRemote(): RemoteFunction?
+	local remotes = ReplicatedStorage:FindFirstChild("ShopRemotes")
+	return remotes and remotes:FindFirstChild("Mines") :: RemoteFunction?
+end
+
+local function myPoints(): number?
+	local stats = player and player:FindFirstChild("leaderstats")
+	local value = stats and stats:FindFirstChild("Points")
+	return if value then value.Value else nil
+end
 
 local COLORS = {
 	page = Color3.fromRGB(16, 18, 26),
@@ -144,7 +160,28 @@ function Minesweeper.new(pages: Instance)
 		Size = UDim2.fromScale(0.33, 0.9),
 		Parent = page,
 	})
-	text({ Name = "Title", Size = UDim2.fromScale(1, 0.09), FontFace = FONT_BOLD, Text = "Minesweeper", Parent = panel })
+	text({ Name = "Title", Size = UDim2.fromScale(0.62, 0.09), FontFace = FONT_BOLD, Text = "Minesweeper", Parent = panel })
+	self.pointsLabel = text({
+		Name = "Points",
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.fromScale(1, 0.015),
+		Size = UDim2.fromScale(0.36, 0.06),
+		FontFace = FONT_BOLD,
+		TextColor3 = Color3.fromRGB(255, 170, 80),
+		TextXAlignment = Enum.TextXAlignment.Right,
+		Text = "⭐ 0",
+		Parent = panel,
+	})
+	task.defer(function()
+		local stats = player:WaitForChild("leaderstats", 60)
+		local value = stats and stats:WaitForChild("Points", 60)
+		if value then
+			value.Changed:Connect(function()
+				self:_refreshPanel()
+			end)
+			self:_refreshPanel()
+		end
+	end)
 
 	-- difficulty
 	local levels = new("Frame", {
@@ -283,7 +320,7 @@ function Minesweeper.new(pages: Instance)
 		Position = UDim2.fromScale(0, 0.92),
 		Size = UDim2.fromScale(1, 0.05),
 		TextColor3 = COLORS.sub,
-		Text = "Click to dig · Right-click to flag",
+		Text = "Win: Easy +10 · Normal +20 · Hard +30 points",
 		Parent = panel,
 	})
 
@@ -347,6 +384,9 @@ function Minesweeper:newGame()
 	self.won = false
 	self.exploded = nil
 	self.startTime = 0
+	self.token = nil
+	self.reward = nil
+	self.round = (self.round or 0) + 1
 	self.timeLabel.Text = "0"
 	self:_buildCells(n)
 	self:_refreshAll()
@@ -389,6 +429,20 @@ function Minesweeper:_dig(i: number)
 		self.started = true
 		self.startTime = os.clock()
 		self:_placeMines(i)
+		-- get a ticket from the server so a win can be paid out
+		local round = self.round
+		task.spawn(function()
+			local r = minesRemote()
+			local ok, token = pcall(function()
+				return r and r:InvokeServer("start", self.level.key)
+			end)
+			if ok and self.round == round then
+				self.token = token
+				if self.over and self.won then
+					self:_claim()
+				end
+			end
+		end)
 	end
 	if self.open[i] then
 		self:_chord(i)
@@ -467,8 +521,29 @@ function Minesweeper:_finish(won: boolean)
 		if not self.best[key] or seconds < self.best[key] then
 			self.best[key] = seconds
 		end
+		self:_claim()
 	end
 	self.lastTime = seconds
+end
+
+-- ask the server to pay out this win
+function Minesweeper:_claim()
+	local token = self.token
+	if not token then
+		return -- the ticket is still on its way; claimed when it arrives
+	end
+	self.token = nil
+	local round = self.round
+	task.spawn(function()
+		local r = minesRemote()
+		local ok, gained = pcall(function()
+			return r and r:InvokeServer("win", token)
+		end)
+		if self.round == round then
+			self.reward = if ok and type(gained) == "number" then gained else 0
+			self:_refreshPanel()
+		end
+	end)
 end
 
 ---------------------------------------------------------------- drawing
@@ -596,7 +671,11 @@ function Minesweeper:_refreshPanel()
 	self.flagButton.BackgroundColor3 = if self.flagMode then Color3.fromRGB(150, 52, 58) else COLORS.card
 	if self.over then
 		if self.won then
-			self.statusLabel.Text = string.format("You cleared it in %ds!", self.lastTime or 0)
+			if self.reward and self.reward > 0 then
+				self.statusLabel.Text = string.format("Cleared in %ds! +%d points", self.lastTime or 0, self.reward)
+			else
+				self.statusLabel.Text = string.format("You cleared it in %ds!", self.lastTime or 0)
+			end
 			self.statusLabel.TextColor3 = COLORS.win
 		else
 			self.statusLabel.Text = "Boom! Tap the face to retry"
@@ -606,6 +685,8 @@ function Minesweeper:_refreshPanel()
 		self.statusLabel.Text = if self.started then "Good luck…" else "Dig anywhere to start"
 		self.statusLabel.TextColor3 = COLORS.sub
 	end
+	local have = myPoints()
+	self.pointsLabel.Text = if have then ("⭐ " .. have) else ""
 	local best = self.best[self.level.key]
 	self.bestLabel.Text = if best then string.format("Best (%s): %ds", self.level.name, best) else ("Best (" .. self.level.name .. "): —")
 end
