@@ -1,6 +1,6 @@
--- Draws chess pieces out of simple UI shapes (Roblox fonts don't include
--- the chess symbols). Each piece fills a square Frame; put it inside a board
--- square and it scales with it.
+-- Draws chess pieces: from the piece picture sheet when it's set up (see
+-- below), otherwise out of simple UI shapes. Each piece fills a square Frame;
+-- put it inside a board square and it scales with it.
 
 local PieceArt = {}
 
@@ -93,6 +93,28 @@ local BUILDERS = {
 	end,
 }
 
+-- Piece pictures: one sprite sheet image (assets/chess-pieces.png in the
+-- repo, 768x256). Columns K Q B N R P, top row white, bottom row black, each
+-- cell 128x128. Set the "SheetImage" attribute on this ModuleScript to the
+-- uploaded image id (e.g. rbxassetid://123). Until it's set, the pieces are
+-- drawn from shapes instead.
+local CELL = 128
+local COLUMN = { K = 0, Q = 1, B = 2, N = 3, R = 4, P = 5 }
+
+local function sheetImage(): string?
+	local id = script:GetAttribute("SheetImage")
+	if typeof(id) == "number" then
+		id = "rbxassetid://" .. id
+	end
+	if typeof(id) == "string" and id ~= "" then
+		if not string.find(id, "://") then
+			id = "rbxassetid://" .. id
+		end
+		return id
+	end
+	return nil
+end
+
 -- Returns a Frame (size 1x1 of its parent) showing the piece, e.g. make("wK").
 function PieceArt.make(code: string): Frame
 	local holder = Instance.new("Frame")
@@ -101,6 +123,21 @@ function PieceArt.make(code: string): Frame
 	holder.Size = UDim2.fromScale(1, 1)
 	local color = string.sub(code, 1, 1)
 	local kind = string.sub(code, 2, 2)
+	local image = sheetImage()
+	if image and COLUMN[kind] then
+		local pic = Instance.new("ImageLabel")
+		pic.Name = "Picture"
+		pic.BackgroundTransparency = 1
+		pic.AnchorPoint = Vector2.new(0.5, 0.5)
+		pic.Position = UDim2.fromScale(0.5, 0.5)
+		pic.Size = UDim2.fromScale(1, 1)
+		pic.Image = image
+		pic.ImageRectOffset = Vector2.new(COLUMN[kind] * CELL, if color == "b" then CELL else 0)
+		pic.ImageRectSize = Vector2.new(CELL, CELL)
+		pic.ScaleType = Enum.ScaleType.Fit
+		pic.Parent = holder
+		return holder
+	end
 	local build = BUILDERS[kind]
 	if build then
 		build(holder, color)
