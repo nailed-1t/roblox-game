@@ -25,4 +25,14 @@ return {
 		cooldown = 90,
 		description = "Swap bodies (avatars) with the closest player for 60 seconds.",
 	},
+	{
+		id = "blink",
+		name = "Blink",
+		price = 100,
+		icon = "✨",
+		key = "C",
+		cooldown = 8,
+		targeted = true, -- sends where your cursor points
+		description = "Teleport from where you stand to wherever your cursor is pointing (up to 60 studs).",
+	},
 }

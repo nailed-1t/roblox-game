@@ -13,7 +13,11 @@ local remotes = ReplicatedStorage:WaitForChild("ShopRemotes")
 local useRemote = remotes:WaitForChild("UseAbility") :: RemoteEvent
 local fxRemote = remotes:WaitForChild("AbilityFx") :: RemoteEvent
 
+local UserInputService = game:GetService("UserInputService")
+local GuiService = game:GetService("GuiService")
+
 local player = Players.LocalPlayer
+local BLINK_RANGE = 60
 local FONT = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Bold)
 
 local gui = Instance.new("ScreenGui")
@@ -68,8 +72,55 @@ end
 local buttons = {} -- [id] = { button, shade, timer }
 local readyAt = {} -- [id] = os.clock()
 
+-- what the cursor (or the middle of the screen in first person) points at
+local function aim(range: number): (BasePart?, Vector3?)
+	local camera = workspace.CurrentCamera
+	local inset = GuiService:GetGuiInset()
+	local mouse = UserInputService:GetMouseLocation() - Vector2.new(0, inset.Y)
+	local view = camera.ViewportSize
+	-- first person (mouse locked) or a cursor off the window: use the screen middle
+	if UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter
+		or mouse.X < 0 or mouse.Y < 0 or mouse.X > view.X or mouse.Y > view.Y then
+		mouse = view / 2
+	end
+	local ray = camera:ViewportPointToRay(mouse.X, mouse.Y)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	local ignore = { camera }
+	if player.Character then
+		table.insert(ignore, player.Character)
+	end
+	params.FilterDescendantsInstances = ignore
+	params.IgnoreWater = false
+	-- reach a bit past the range measured from the camera, then check from the body
+	local result = workspace:Raycast(ray.Origin, ray.Direction * (range + 30), params)
+	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+	if not result or not root or (result.Position - root.Position).Magnitude > range then
+		return nil, nil
+	end
+	if result.Instance:IsA("Terrain") then
+		return nil, nil -- the sea (or sea floor) isn't somewhere to stand
+	end
+	return result.Instance, result.Instance.CFrame:PointToObjectSpace(result.Position)
+end
+
+local itemsById = {}
+for _, item in ipairs(ShopItems) do
+	itemsById[item.id] = item
+end
+
 local function use(id: string)
 	if (readyAt[id] or 0) > os.clock() then
+		return
+	end
+	local item = itemsById[id]
+	if item and item.targeted then
+		local part, offset = aim(BLINK_RANGE)
+		if not part then
+			say("Point at a spot within " .. BLINK_RANGE .. " studs.")
+			return
+		end
+		useRemote:FireServer(id, part, offset)
 		return
 	end
 	useRemote:FireServer(id)

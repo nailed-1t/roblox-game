@@ -2,6 +2,7 @@
 --   Ardor Scream: a yell that throws everyone within range away from you
 --                 and ragdolls them for a moment.
 --   Head Swap:    swaps your avatar with the closest player's for a minute.
+--   Blink:        teleports you to where your cursor points.
 -- Clients ask with ShopRemotes.UseAbility; the server checks ownership and
 -- cooldowns. ShopRemotes.AbilityFx tells clients what happened (ragdoll your
 -- own character, cooldown started, short messages).
@@ -24,9 +25,11 @@ local useRemote = remote("RemoteEvent", "UseAbility") :: RemoteEvent
 local fxRemote = remote("RemoteEvent", "AbilityFx") :: RemoteEvent
 
 local SCREAM_RANGE = 22
-local SCREAM_PUSH = 65
-local SCREAM_LIFT = 32
-local RAGDOLL_SECONDS = 2.5
+local SCREAM_PUSH = 50
+local SCREAM_LIFT = 24
+local RAGDOLL_SECONDS = 5
+local BLINK_RANGE = 60 -- what the client aims for
+local BLINK_SLACK = 20 -- the train moves while the request travels
 local SWAP_RANGE = 40
 local SWAP_SECONDS = 60
 
@@ -55,8 +58,14 @@ local function ragdoll(player: Player, push: Vector3)
 	if not character or ragdolled[character] then
 		return
 	end
-	local state = { motors = {}, made = {}, collide = {} }
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then
+		return
+	end
+	local state = { motors = {}, made = {}, collide = {}, requiresNeck = humanoid.RequiresNeck }
 	ragdolled[character] = state
+	-- with the neck joint switched off a humanoid normally dies; it mustn't here
+	humanoid.RequiresNeck = false
 	for _, motor in ipairs(character:GetDescendants()) do
 		if motor:IsA("Motor6D") and motor.Name ~= "RootJoint" and motor.Part0 and motor.Part1 then
 			local a0 = Instance.new("Attachment")
@@ -103,6 +112,9 @@ local function ragdoll(player: Player, push: Vector3)
 			if part.Parent then
 				part.CanCollide = was
 			end
+		end
+		if humanoid.Parent then
+			humanoid.RequiresNeck = state.requiresNeck
 		end
 		if player.Character == character then
 			fxRemote:FireClient(player, "ragdoll", false)
@@ -292,14 +304,150 @@ local function headSwap(player: Player): (boolean, string?)
 	return true, "You swapped bodies with " .. best.DisplayName .. "!"
 end
 
+---------------------------------------------------------------- Blink
+
+local function fadePart(props: { [string]: any }, goal: { [string]: any }, seconds: number)
+	local p = Instance.new("Part")
+	p.Anchored = true
+	p.CanCollide = false
+	p.CanQuery = false
+	p.CanTouch = false
+	p.CastShadow = false
+	p.Material = Enum.Material.Neon
+	for k, v in pairs(props) do
+		(p :: any)[k] = v
+	end
+	p.Parent = workspace
+	TweenService:Create(p, TweenInfo.new(seconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), goal):Play()
+	Debris:AddItem(p, seconds + 0.1)
+	return p
+end
+
+local PURPLE = Color3.fromRGB(170, 110, 255)
+local PINK = Color3.fromRGB(255, 140, 240)
+
+local function sparkleBurst(at: Vector3, count: number)
+	local holder = Instance.new("Part")
+	holder.Anchored = true
+	holder.CanCollide = false
+	holder.CanQuery = false
+	holder.CanTouch = false
+	holder.Transparency = 1
+	holder.Size = Vector3.new(1, 1, 1)
+	holder.CFrame = CFrame.new(at)
+	local sparks = Instance.new("ParticleEmitter")
+	sparks.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+	sparks.Color = ColorSequence.new(PURPLE, PINK)
+	sparks.LightEmission = 1
+	sparks.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1.2), NumberSequenceKeypoint.new(1, 0) })
+	sparks.Lifetime = NumberRange.new(0.4, 0.9)
+	sparks.Speed = NumberRange.new(10, 22)
+	sparks.SpreadAngle = Vector2.new(180, 180)
+	sparks.Drag = 4
+	sparks.Rate = 0
+	sparks.Parent = holder
+	local light = Instance.new("PointLight")
+	light.Color = PURPLE
+	light.Range = 18
+	light.Brightness = 4
+	light.Parent = holder
+	holder.Parent = workspace
+	sparks:Emit(count)
+	TweenService:Create(light, TweenInfo.new(0.6), { Brightness = 0 }):Play()
+	Debris:AddItem(holder, 1.2)
+end
+
+-- a purple see-through copy of the body left behind where you were
+local function afterimage(character: Model)
+	for _, part in ipairs(character:GetChildren()) do
+		if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" and part.Transparency < 1 then
+			fadePart({
+				Name = "BlinkGhost",
+				Size = part.Size,
+				CFrame = part.CFrame,
+				Color = PURPLE,
+				Transparency = 0.35,
+			}, { Transparency = 1, Size = part.Size * 1.25 }, 0.6)
+		end
+	end
+end
+
+local function blink(player: Player, part: any, offset: any): (boolean, string?)
+	local root = rootOf(player)
+	if not root then
+		return false, nil
+	end
+	if typeof(part) ~= "Instance" or not part:IsA("BasePart") or not part:IsDescendantOf(workspace) or typeof(offset) ~= "Vector3" then
+		return false, "Point your cursor at something closer."
+	end
+	if part:IsDescendantOf(player.Character) then
+		return false, nil
+	end
+	-- the client aimed at a spot on a part; rebuild it now (the train may have moved)
+	local hit = part.CFrame:PointToWorldSpace(offset)
+	if (hit - root.Position).Magnitude > BLINK_RANGE + BLINK_SLACK then
+		return false, "That's too far to blink to."
+	end
+	local character = player.Character
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local standHeight = (humanoid and humanoid.HipHeight or 2) + root.Size.Y / 2
+	-- find the floor under the spot (or just above it if it's a wall)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { character }
+	local back = (root.Position - hit)
+	back = Vector3.new(back.X, 0, back.Z)
+	local spot = hit + (if back.Magnitude > 0.01 then back.Unit * 1.5 else Vector3.zero) + Vector3.new(0, 3, 0)
+	local floor = workspace:Raycast(spot, Vector3.new(0, -12, 0), params)
+	local target = if floor then floor.Position + Vector3.new(0, standHeight + 0.1, 0) else spot + Vector3.new(0, standHeight, 0)
+
+	local from = root.Position
+	afterimage(character)
+	sparkleBurst(from, 50)
+	-- a streak between the two spots
+	local mid = (from + target) / 2
+	local length = (target - from).Magnitude
+	if length > 0.5 then
+		fadePart({
+			Name = "BlinkTrail",
+			Size = Vector3.new(0.6, 0.6, length),
+			CFrame = CFrame.lookAt(mid, target),
+			Color = PINK,
+			Transparency = 0.2,
+		}, { Transparency = 1, Size = Vector3.new(0.05, 0.05, length) }, 0.45)
+	end
+	-- keep facing the same way, keep moving with the train
+	local velocity = root.AssemblyLinearVelocity
+	character:PivotTo(CFrame.new(target) * root.CFrame.Rotation)
+	root.AssemblyLinearVelocity = velocity
+	sparkleBurst(target, 60)
+	fadePart({
+		Name = "BlinkRing",
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(0.3, 2, 2),
+		CFrame = CFrame.new(target - Vector3.new(0, standHeight - 0.2, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+		Color = PURPLE,
+		Transparency = 0.1,
+	}, { Size = Vector3.new(0.3, 14, 14), Transparency = 1 }, 0.5)
+	local sound = Instance.new("Sound")
+	sound.SoundId = "rbxasset://sounds/swoosh.wav"
+	sound.PlaybackSpeed = 1.6
+	sound.Volume = 1.2
+	sound.Parent = root
+	sound:Play()
+	Debris:AddItem(sound, 2)
+	return true, nil
+end
+
 ---------------------------------------------------------------- requests
 
 local USE = {
 	ardor = ardorScream,
 	headswap = headSwap,
+	blink = blink,
 }
 
-useRemote.OnServerEvent:Connect(function(player: Player, id: any)
+useRemote.OnServerEvent:Connect(function(player: Player, id: any, ...)
 	local item = typeof(id) == "string" and itemsById[id]
 	local use = item and USE[item.id]
 	if not use or not player:GetAttribute("Owned_" .. item.id) then
@@ -310,7 +458,7 @@ useRemote.OnServerEvent:Connect(function(player: Player, id: any)
 	if (readyAt[player][item.id] or 0) > now then
 		return
 	end
-	local ok, message = use(player)
+	local ok, message = use(player, ...)
 	if ok then
 		readyAt[player][item.id] = now + item.cooldown
 		fxRemote:FireClient(player, "cooldown", item.id, item.cooldown)
