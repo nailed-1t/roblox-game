@@ -1,6 +1,6 @@
 -- The Deepwoken Tablet's screen. When the tablet is taken out (M) a local copy
 -- of the tablet model swings up in front of the camera until it fills ~90% of
--- the screen, and the UI is drawn on that model's screen part. The mouse is
+-- the screen, and the UI is shown on that model's screen. The mouse is
 -- freed so you can click on it. Putting it away swings it back down.
 -- Runs the Chess app (challenges + games against other players, enforced by
 -- the server) and the Shop app, which flies the camera to the shop stall.
@@ -9,6 +9,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
 
 local shared = ReplicatedStorage:WaitForChild("TabletShared")
 local TabletView = require(shared:WaitForChild("TabletView"))
@@ -21,24 +22,9 @@ local playerGui = player:WaitForChild("PlayerGui")
 
 ---------------------------------------------------------------- screen
 
--- the UI itself, drawn on the tablet model's screen
-local surface = Instance.new("SurfaceGui")
-surface.Name = "TabletSurface"
-surface.Face = Enum.NormalId.Front
-surface.SizingMode = Enum.SurfaceGuiSizingMode.FixedSize
-surface.CanvasSize = Vector2.new(800, 496)
-surface.LightInfluence = 0
-surface.Brightness = 1.3
-surface.AlwaysOnTop = true -- never hidden behind the tablet's own bezel
-surface.ResetOnSpawn = false
-surface.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-surface.Enabled = false
-surface.Parent = playerGui
-
-local view = TabletView.new(surface, { fullscreen = true })
-
--- on-screen layer: frees the mouse while the tablet is out, and holds the
--- shop overlay
+-- on-screen layer: holds the tablet's UI (kept lined up exactly over the 3D
+-- tablet's screen every frame, so clicks always land), frees the mouse while
+-- the tablet is out, and holds the shop overlay
 local gui = Instance.new("ScreenGui")
 gui.Name = "TabletScreen"
 gui.IgnoreGuiInset = true
@@ -56,6 +42,20 @@ unlock.Text = ""
 unlock.BackgroundTransparency = 1
 unlock.Size = UDim2.fromOffset(0, 0)
 unlock.Parent = gui
+
+local CANVAS = Vector2.new(800, 496) -- the UI is laid out at this size, then scaled
+local holder = Instance.new("Frame")
+holder.Name = "TabletHolder"
+holder.AnchorPoint = Vector2.new(0.5, 0.5)
+holder.Size = UDim2.fromOffset(CANVAS.X, CANVAS.Y)
+holder.BackgroundTransparency = 1
+holder.ZIndex = 1
+holder.Visible = false
+holder.Parent = gui
+local holderScale = Instance.new("UIScale")
+holderScale.Parent = holder
+
+local view = TabletView.new(holder, { fullscreen = true })
 
 -- small pop-up used when the tablet is put away
 local toastGui = Instance.new("ScreenGui")
@@ -300,7 +300,6 @@ local function buildLocalTablet(tool: Tool): boolean
 	end
 	model.Parent = camera -- parts under the camera are only drawn for you
 	localTablet = model
-	surface.Adornee = localDisplay
 	return true
 end
 
@@ -310,7 +309,6 @@ local function destroyLocalTablet()
 	end
 	localTablet, localDisplay = nil, nil
 	offsets = {}
-	surface.Adornee = nil
 end
 
 local function animateTo(goal: number)
@@ -350,6 +348,16 @@ local function placeLocalTablet(t: number)
 	for part, rel in pairs(offsets) do
 		part.CFrame = displayCF * rel
 	end
+	-- line the UI up over the model's screen
+	if localDisplay then
+		local half = localDisplay.Size / 2
+		local mid = camera:WorldToViewportPoint(localDisplay.CFrame:PointToWorldSpace(Vector3.new(0, 0, -half.Z)))
+		local a = camera:WorldToViewportPoint(localDisplay.CFrame:PointToWorldSpace(Vector3.new(half.X, 0, -half.Z)))
+		local b = camera:WorldToViewportPoint(localDisplay.CFrame:PointToWorldSpace(Vector3.new(-half.X, 0, -half.Z)))
+		holder.Position = UDim2.fromOffset(mid.X, mid.Y)
+		holderScale.Scale = math.max(math.abs(b.X - a.X), 1) / CANVAS.X
+		holder.Rotation = math.deg(spin)
+	end
 end
 
 ---------------------------------------------------------------- shop (camera)
@@ -361,10 +369,15 @@ local overlay = Instance.new("Frame")
 overlay.Name = "ShopOverlay"
 overlay.AnchorPoint = Vector2.new(1, 0.5)
 overlay.Position = UDim2.new(1, -24, 0.5, 0)
-overlay.Size = UDim2.new(0, 380, 0.82, 0) -- right side, leaves the stall in view
+overlay.Size = UDim2.new(0.28, 0, 0.82, 0) -- right side, leaves the stall in view
+local overlaySize = Instance.new("UISizeConstraint")
+overlaySize.MinSize = Vector2.new(220, 0)
+overlaySize.MaxSize = Vector2.new(380, math.huge)
+overlaySize.Parent = overlay
 overlay.BackgroundColor3 = Color3.fromRGB(16, 18, 26)
 overlay.BackgroundTransparency = 0.12
 overlay.Visible = false
+overlay.ZIndex = 5
 overlay.Parent = gui
 Instance.new("UICorner", overlay).CornerRadius = UDim.new(0, 18)
 local overlayStroke = Instance.new("UIStroke", overlay)
@@ -457,7 +470,13 @@ for i = 1, itemCount do
 	price.Parent = card
 end
 
+-- the ShopCamera part may not be streamed in, so the server also publishes
+-- its CFrame as a workspace attribute (ShopCameraSync)
 local function shopSpot(): CFrame?
+	local cf = workspace:GetAttribute("ShopCameraCFrame")
+	if typeof(cf) == "CFrame" then
+		return cf
+	end
 	local spot = workspace:FindFirstChild("ShopCamera")
 	return if spot and spot:IsA("BasePart") then spot.CFrame else nil
 end
@@ -470,6 +489,10 @@ local function enterShop()
 	inShop = true
 	view:showPage("home")
 	animateTo(0)
+	-- the stall is far away; ask for it to be loaded while the camera flies
+	task.spawn(function()
+		pcall(player.RequestStreamAroundAsync, player, target.Position + target.LookVector * 450, 5)
+	end)
 	camera.CameraType = Enum.CameraType.Scriptable
 	if shopTween then
 		shopTween:Cancel()
@@ -529,7 +552,7 @@ local function open()
 	shown, showGoal = 0, 0
 	placeLocalTablet(0)
 	animateTo(1)
-	surface.Enabled = true
+	holder.Visible = true
 	gui.Enabled = true
 	unlock.Visible = true
 	chessEvent:FireServer("sync")
@@ -548,7 +571,6 @@ local function close()
 	unlock.Visible = false
 	view:showPromotion(nil)
 	pendingPromotion = nil
-	gui.Enabled = false
 	animateTo(0) -- swings down, then the copy is removed (see the render step)
 end
 
@@ -794,13 +816,19 @@ RunService:BindToRenderStep("TabletLocal", Enum.RenderPriority.Camera.Value + 1,
 		end
 	end
 	if not isOpen and shown <= 0 then
-		surface.Enabled = false
+		holder.Visible = false
+		gui.Enabled = false
 		destroyLocalTablet()
 		setHeldHidden(false)
 		return
 	end
 	setHeldHidden(true)
 	placeLocalTablet(shown)
+	if isOpen then
+		-- first person locks the mouse to the middle every frame; free it so
+		-- the tablet's buttons (and the shop panel) can be clicked
+		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+	end
 end)
 
 local lastTick = 0
