@@ -1,4 +1,4 @@
--- The tablet's Fish Tank app: a live 3D view of the game's fish tank (the
+-- The tablet's Fish Tank app: a side-on (2D-looking) view of the game's fish tank (the
 -- imported ocean bowl, workspace.fish_tank_test), spinning, with the three fish
 -- leaping from one rim right across to the other whenever the server announces
 -- a jump (see the FishTank server script). Tap a fish in the air for 10 points.
@@ -194,7 +194,8 @@ function FishApp.new(pages: Instance)
 		Parent = page,
 	})
 	local world = new("WorldModel", { Parent = view })
-	local camera = new("Camera", { FieldOfView = 40, Parent = view })
+	-- a narrow lens from far away flattens it into a 2D side view
+	local camera = new("Camera", { FieldOfView = 10.5, Parent = view })
 	view.CurrentCamera = camera
 	self.view, self.world, self.camera = view, world, camera
 	self.fishes = {}
@@ -302,10 +303,10 @@ function FishApp:_loadTank()
 	local size = copy.Size
 	self.radius = math.max(size.X, size.Z) / 2
 	self.top = size.Y / 2
-	-- above and in front, so the whole bowl and the top of the leap fit
-	-- between the header and the hint
+	-- straight from the side, level with the middle of the leap, so it looks
+	-- 2D; the whole bowl and the top of the leap fit between header and hint
 	local r = self.radius
-	self.camera.CFrame = CFrame.lookAt(Vector3.new(0, r * 1.36, r * 3.62), Vector3.new(0, r * 0.36, 0))
+	self.camera.CFrame = CFrame.lookAt(Vector3.new(0, r * 0.48, r * 13.9), Vector3.new(0, r * 0.48, 0))
 end
 
 function FishApp:_refresh()
