@@ -5,7 +5,7 @@
 --   FishJumpId     counts up with every jump
 --   FishJumpAt     server time (workspace:GetServerTimeNow()) it starts
 --   FishJumpLength seconds it's in the air
---   FishJumpAngle  where on the 3D tank's rim it jumps (degrees)
+--   FishJumpAngle  which rim of the 3D tank it leaps from, to the opposite rim (degrees)
 --   FishJumpEdge   which side of the tablet screen (0 bottom, 1 left, 2 right, 3 top)
 --   FishJumpPos    where along that side (0..1)
 --   FishJumpFish   which of the three 3D fish jumps (1..3)
@@ -14,7 +14,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local REWARD = 10
-local LENGTH = 2.4
+local LENGTH = 3.2 -- time to fly across the tank
 local GAP = { 4, 9 } -- seconds between jumps
 local LATE = 0.6 -- allowance for the click travelling to the server
 
