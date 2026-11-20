@@ -1122,8 +1122,8 @@ function TabletView:renderLobby(players, invites, outgoingText: string, thumbnai
 			Name = level[1],
 			Text = level[2],
 			AnchorPoint = Vector2.new(1, 0.5),
-			Position = UDim2.fromScale(0.97 - (3 - i) * 0.17, 0.5),
-			Size = UDim2.fromScale(0.16, 0.72),
+			Position = UDim2.fromScale(0.97 - (3 - i) * 0.185, 0.5),
+			Size = UDim2.fromScale(0.175, 0.72),
 		}, Color3.fromRGB(110, 80, 190))
 		b.Parent = bot
 		b.Activated:Connect(function()

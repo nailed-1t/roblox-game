@@ -75,6 +75,12 @@ function Manager.new(send: SendFn, findPlayer: FindFn, options: { [string]: any 
 	return self
 end
 
+-- the computer is a plain table; real players are Player instances (reading
+-- a field they don't have would error, so check the type first)
+local function isBot(p): boolean
+	return type(p) == "table" and p.isBot == true
+end
+
 local function nameOf(player): string
 	return player.DisplayName or player.Name
 end
@@ -149,8 +155,8 @@ function Manager:snapshot(g)
 	end
 	return {
 		id = g.id,
-		white = { id = g.white.UserId, name = nameOf(g.white), bot = g.white.isBot == true },
-		black = { id = g.black.UserId, name = nameOf(g.black), bot = g.black.isBot == true },
+		white = { id = g.white.UserId, name = nameOf(g.white), bot = isBot(g.white) },
+		black = { id = g.black.UserId, name = nameOf(g.black), bot = isBot(g.black) },
 		board = s.board,
 		turn = s.turn,
 		castling = s.castling,
@@ -180,7 +186,7 @@ end
 function Manager:broadcast(g)
 	local snap = self:snapshot(g)
 	for _, p in ipairs({ g.white, g.black }) do
-		if not p.isBot and self.playerGame[p.UserId] == g then
+		if not isBot(p) and self.playerGame[p.UserId] == g then
 			self.send(p, "state", snap)
 		end
 	end
@@ -204,7 +210,7 @@ function Manager:gamesList()
 				black = nameOf(g.black),
 				modeName = g.modeName,
 				moves = #g.moves,
-				bot = g.white.isBot == true or g.black.isBot == true,
+				bot = isBot(g.white) or isBot(g.black),
 			})
 		end
 	end
@@ -254,11 +260,11 @@ end
 
 function Manager:startGame(a, b, mode, whiteFirst: boolean?)
 	self:clearInvites(a, "busy")
-	if not b.isBot then
+	if not isBot(b) then
 		self:clearInvites(b, "busy")
 	end
 	self:stopWatching(a)
-	if not b.isBot then
+	if not isBot(b) then
 		self:stopWatching(b)
 	end
 	self.nextId += 1
@@ -283,7 +289,7 @@ function Manager:startGame(a, b, mode, whiteFirst: boolean?)
 	}
 	self.games[g.id] = g
 	self.playerGame[a.UserId] = g
-	if not b.isBot then
+	if not isBot(b) then
 		self.playerGame[b.UserId] = g
 	end
 	self:broadcast(g)
@@ -310,7 +316,7 @@ function Manager:finish(g, result: string, reason: string)
 	if result == "white" or result == "black" then
 		local winner = if result == "white" then g.white else g.black
 		local decisive = ChessRules.WINS[reason] == true
-		if not winner.isBot and (decisive or #g.moves >= MIN_MOVES_FOR_EASY_WIN) then
+		if not isBot(winner) and (decisive or #g.moves >= MIN_MOVES_FOR_EASY_WIN) then
 			g.rewards[tostring(winner.UserId)] = REWARD
 			self.reward(winner, REWARD)
 		end
@@ -362,7 +368,7 @@ end
 -- if it's the computer's move, let it think
 function Manager:botTurn(g)
 	local bot = if g.state.turn == "w" then g.white else g.black
-	if g.over or not bot.isBot or not self.chooseMove then
+	if g.over or not isBot(bot) or not self.chooseMove then
 		return
 	end
 	local stateNow = g.state
@@ -495,7 +501,7 @@ function Manager:handle(player, action: string, data: any)
 		local other = if color == "w" then g.black else g.white
 		if g.drawOffer and g.drawOffer ~= color then
 			self:finish(g, "draw", "agreement")
-		elseif not g.drawOffer and not other.isBot then
+		elseif not g.drawOffer and not isBot(other) then
 			g.drawOffer = color
 			self:broadcast(g)
 		end
