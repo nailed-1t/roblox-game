@@ -3,15 +3,41 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Manager = require(script.Parent:WaitForChild("ChessManager"))
+local ChessBot = require(script.Parent:WaitForChild("ChessBot"))
 local event = ReplicatedStorage:WaitForChild("TabletRemotes"):WaitForChild("ChessEvent") :: RemoteEvent
 
 local manager = Manager.new(function(player, action, data)
-	if player and player.Parent then
+	if player and typeof(player) == "Instance" and player.Parent then
 		event:FireClient(player, action, data)
 	end
 end, function(userId)
 	return Players:GetPlayerByUserId(userId)
-end)
+end, {
+	-- the winner's points (leaderstats are saved by the Economy script)
+	reward = function(player, amount)
+		local stats = player:FindFirstChild("leaderstats")
+		local points = stats and stats:FindFirstChild("Points")
+		if points then
+			points.Value += amount
+		end
+	end,
+	listPlayers = function()
+		return Players:GetPlayers()
+	end,
+	-- the computer thinks in its own thread, a few milliseconds per frame
+	think = function(_, fn)
+		task.spawn(function()
+			task.wait(0.4) -- a short pause so its moves don't feel instant
+			local ok, err = pcall(fn, function()
+				task.wait()
+			end)
+			if not ok then
+				warn("[Chess] computer error:", err)
+			end
+		end)
+	end,
+	chooseMove = ChessBot.choose,
+})
 
 -- up to 10 messages per second per player is plenty for chess; ignore spam
 local window: { [number]: { start: number, count: number } } = {}
@@ -38,9 +64,10 @@ Players.PlayerRemoving:Connect(function(player)
 	manager:playerLeft(player)
 end)
 
+-- clocks and challenge timeouts
 task.spawn(function()
 	while true do
-		task.wait(1)
+		task.wait(0.2)
 		manager:tick()
 	end
 end)

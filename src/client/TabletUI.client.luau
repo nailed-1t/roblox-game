@@ -2,8 +2,10 @@
 -- of the tablet model swings up in front of the camera until it fills ~90% of
 -- the screen, and the UI is shown on that model's screen. The mouse is
 -- freed so you can click on it. Putting it away swings it back down.
--- Runs the Chess app (challenges + games against other players, enforced by
--- the server) and the Shop app, which flies the camera to the shop stall.
+-- Runs the Chess app (challenges + games against other players or the
+-- computer, enforced by the server; chess.com-style time controls and
+-- variants; watching other games; premoves; settings) and the Shop app,
+-- which flies the camera to the shop stall.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -113,6 +115,21 @@ local outgoing = nil -- {to, name, status, expires}
 local bannerFrom = nil -- whose challenge the banner is showing
 local resignArmed = false
 local thumbnails = {}
+local liveGames = {} -- games you could watch (from the server)
+local chessMode = { time = "rapid", variant = "standard" } -- picked in the lobby
+local premove = nil -- {fr, fc, tr, tc} queued for when it's your turn
+local clockBase = nil -- {w, b, running, at}: clocks as last sent, and when
+local settingsOpen = false
+local settings = {
+	theme = "wood",
+	legalMoves = true,
+	lastMove = true,
+	coordinates = true,
+	premoves = true,
+	autoQueen = false,
+	confirmResign = true,
+	flip = false,
+}
 
 local function now()
 	return os.clock()
@@ -126,34 +143,94 @@ local function stateOf(snap)
 		ep = snap.ep,
 		halfmove = snap.halfmove,
 		fullmove = snap.fullmove,
+		variant = snap.variant,
+		kingFile = snap.kingFile,
+		rookFiles = snap.rookFiles,
+		checks = snap.checks,
 	}
+end
+
+-- are we watching rather than playing?
+local function spectating(): boolean
+	return game_ ~= nil and game_.white.id ~= player.UserId and game_.black.id ~= player.UserId
 end
 
 local REASONS = {
 	checkmate = "checkmate",
 	resign = "resignation",
-	left = "opponent left",
+	left = "player left",
 	stalemate = "stalemate",
 	fifty = "50-move rule",
 	material = "not enough pieces",
+	hill = "king reached the hill",
+	threecheck = "three checks",
+	timeout = "time ran out",
+	timeoutdraw = "time ran out, but no mating material",
+	agreement = "agreed",
+	aborted = "game aborted",
 }
+
+local GOOD = Color3.fromRGB(120, 230, 150)
+local BAD = Color3.fromRGB(255, 120, 110)
+local NEUTRAL = Color3.fromRGB(200, 200, 210)
 
 local function statusFor(snap): (string, Color3)
 	if snap.over then
+		local why = REASONS[snap.reason] or ""
 		if snap.result == "draw" then
-			return "Draw — " .. (REASONS[snap.reason] or ""), Color3.fromRGB(200, 200, 210)
+			return (if snap.reason == "aborted" then "Aborted" else "Draw") .. " — " .. why, NEUTRAL
+		end
+		if spectating() then
+			local winner = if snap.result == "white" then snap.white.name else snap.black.name
+			return winner .. " wins (" .. why .. ")", NEUTRAL
 		end
 		local iWon = (snap.result == "white") == (myColor == "w")
-		local why = REASONS[snap.reason] or ""
 		if iWon then
-			return "You win! (" .. why .. ")", Color3.fromRGB(120, 230, 150)
+			local gained = snap.rewards and snap.rewards[tostring(player.UserId)]
+			return "You win! " .. (if gained then "+" .. gained .. " points" else "(" .. why .. ")"), GOOD
 		end
-		return "You lost (" .. why .. ")", Color3.fromRGB(255, 120, 110)
+		return "You lost (" .. why .. ")", BAD
+	end
+	if spectating() then
+		local who = if snap.turn == "w" then snap.white.name else snap.black.name
+		return "Watching · " .. who .. " to move" .. (if snap.inCheck then " — Check!" else ""), NEUTRAL
+	end
+	if snap.drawOffer and snap.drawOffer ~= myColor then
+		return "Your opponent offers a draw", Color3.fromRGB(255, 210, 110)
 	end
 	if snap.turn == myColor then
-		return if snap.inCheck then "Your move — Check!" else "Your move", if snap.inCheck then Color3.fromRGB(255, 140, 120) else Color3.fromRGB(120, 230, 150)
+		return if snap.inCheck then "Your move — Check!" else "Your move", if snap.inCheck then Color3.fromRGB(255, 140, 120) else GOOD
 	end
-	return "Waiting for opponent…", Color3.fromRGB(200, 200, 210)
+	if premove then
+		return "Premove set — right-click to cancel", Color3.fromRGB(255, 160, 150)
+	end
+	return "Waiting for opponent…", NEUTRAL
+end
+
+-- the clocks right now, counting down from what the server last sent
+local function currentClocks()
+	if not clockBase then
+		return nil
+	end
+	local w, b = clockBase.w, clockBase.b
+	if clockBase.running and game_ and not game_.over then
+		local used = now() - clockBase.at
+		if clockBase.running == "w" then
+			w -= used
+		else
+			b -= used
+		end
+	end
+	return { w = w, b = b, running = if game_ and not game_.over then clockBase.running else nil }
+end
+
+-- which side is drawn at the bottom of the board
+local function bottomColor(): string
+	local base = if spectating() then "w" else myColor
+	if settings.flip then
+		return if base == "w" then "b" else "w"
+	end
+	return base
 end
 
 local function outgoingText(): string
@@ -162,7 +239,7 @@ local function outgoingText(): string
 	end
 	local n = outgoing.name
 	if outgoing.status == "waiting" then
-		return string.format("Waiting for %s to answer… %ds", n, math.max(0, math.ceil(outgoing.expires - now())))
+		return string.format("Waiting for %s to answer (%s)… %ds", n, outgoing.modeName or "", math.max(0, math.ceil(outgoing.expires - now())))
 	elseif outgoing.status == "declined" then
 		return n .. " declined your challenge"
 	elseif outgoing.status == "expired" then
@@ -189,11 +266,29 @@ local function fetchThumbnail(userId: number)
 end
 
 local function renderChess()
+	view:showChessSettings(settingsOpen, settings)
 	if game_ then
 		view:showChessScreen("game")
 		local text, color = statusFor(game_)
-		view:renderGame(game_, myColor, selected, targets, text, color)
-		view.resignButton.Text = if resignArmed then "Tap again to resign" else "Resign"
+		local drawText = "Offer draw"
+		if game_.drawOffer == myColor then
+			drawText = "Draw offered…"
+		elseif game_.drawOffer then
+			drawText = "Accept draw"
+		end
+		view:renderGame(game_, {
+			bottom = bottomColor(),
+			me = if spectating() then nil else myColor,
+			selected = selected,
+			targets = targets,
+			premove = premove,
+			status = text,
+			statusColor = color,
+			settings = settings,
+			resignText = if resignArmed then "Tap again" elseif game_.clock and #game_.moves < 2 then "Abort" else "Resign",
+			drawText = drawText,
+		})
+		view:updateClocks(currentClocks(), bottomColor())
 	else
 		view:showChessScreen("lobby")
 		local list = {}
@@ -209,7 +304,7 @@ local function renderChess()
 		end)
 		local inv = {}
 		for from, info in pairs(invites) do
-			table.insert(inv, { from = from, name = info.name, seconds = info.expires - now() })
+			table.insert(inv, { from = from, name = info.name, seconds = info.expires - now(), modeName = info.modeName })
 		end
 		table.sort(inv, function(a, b)
 			return a.seconds > b.seconds
@@ -220,7 +315,7 @@ local function renderChess()
 				thumbs[id] = img
 			end
 		end
-		view:renderLobby(list, inv, outgoingText(), thumbs)
+		view:renderLobby(list, inv, outgoingText(), thumbs, liveGames, chessMode)
 	end
 end
 
@@ -527,6 +622,8 @@ local function close()
 	unlock.Visible = false
 	view:showPromotion(nil)
 	pendingPromotion = nil
+	settingsOpen = false
+	view:showChessSettings(false)
 	animateTo(0) -- swings down, then the copy is removed (see the render step)
 end
 
@@ -572,7 +669,55 @@ view:on("home", function()
 end)
 
 view:on("challenge", function(userId)
-	chessEvent:FireServer("challenge", { target = userId })
+	chessEvent:FireServer("challenge", { target = userId, mode = chessMode })
+end)
+
+view:on("pickTime", function(key)
+	chessMode.time = key
+	renderChess()
+end)
+view:on("pickVariant", function(key)
+	chessMode.variant = key
+	renderChess()
+end)
+view:on("computer", function(level)
+	chessEvent:FireServer("computer", { level = level, mode = chessMode })
+end)
+view:on("watch", function(id)
+	chessEvent:FireServer("watch", { game = id })
+end)
+view:on("settings", function()
+	settingsOpen = true
+	renderChess()
+end)
+view:on("closeSettings", function()
+	settingsOpen = false
+	renderChess()
+end)
+view:on("setting", function(key, value)
+	if value == nil then
+		settings[key] = not settings[key]
+	else
+		settings[key] = value
+	end
+	if key == "premoves" and not settings.premoves then
+		premove = nil
+	end
+	renderChess()
+end)
+view:on("cancelPremove", function()
+	if premove or selected then
+		premove = nil
+		if game_ and game_.turn ~= myColor then
+			selected, targets = nil, {}
+		end
+		renderChess()
+	end
+end)
+view:on("draw", function()
+	if game_ and not game_.over and game_.drawOffer ~= myColor then
+		chessEvent:FireServer("draw")
+	end
 end)
 
 view:on("cancelChallenge", function()
@@ -605,32 +750,63 @@ view:on("bannerNo", function()
 	end
 end)
 
+-- the moves your piece could make next turn, for a premove (the position
+-- will have changed by then, so it's checked again before it's played)
+local function premoveTargets(r: number, c: number)
+	local st = stateOf(game_)
+	st.turn = myColor
+	st.ep = nil
+	return ChessRules.legalMovesFrom(st, r, c)
+end
+
+local function sendMove(m, promo: string?)
+	chessEvent:FireServer("move", { fr = m.fr, fc = m.fc, tr = m.tr, tc = m.tc, promo = promo })
+end
+
 view:on("square", function(row: number, col: number)
-	if not game_ or game_.over or game_.turn ~= myColor or pendingPromotion then
+	if not game_ or game_.over or spectating() or pendingPromotion then
 		return
 	end
-	local flip = myColor == "b"
+	local flip = bottomColor() == "b"
 	local r = if flip then row else 9 - row
 	local c = if flip then 9 - col else col
+	local myTurn = game_.turn == myColor
+	if not myTurn and not settings.premoves then
+		return
+	end
 	if selected then
 		for _, m in ipairs(targets) do
 			if m.tr == r and m.tc == c then
+				if not myTurn then
+					-- queue it; promotions in a premove always make a queen
+					premove = { fr = m.fr, fc = m.fc, tr = m.tr, tc = m.tc }
+					selected, targets = nil, {}
+					renderChess()
+					return
+				end
 				if m.promo then
+					if settings.autoQueen then
+						sendMove(m, "Q")
+						selected, targets = nil, {}
+						renderChess()
+						return
+					end
 					pendingPromotion = { fr = m.fr, fc = m.fc, tr = m.tr, tc = m.tc }
 					view:showPromotion(myColor)
 					return
 				end
-				chessEvent:FireServer("move", { fr = m.fr, fc = m.fc, tr = m.tr, tc = m.tc })
+				sendMove(m)
 				selected, targets = nil, {}
 				renderChess()
 				return
 			end
 		end
 	end
+	premove = nil -- clicking elsewhere replaces any queued premove
 	local piece = game_.board[r][c]
 	if piece ~= "" and string.sub(piece, 1, 1) == myColor and not (selected and selected[1] == r and selected[2] == c) then
 		selected = { r, c }
-		targets = ChessRules.legalMovesFrom(stateOf(game_), r, c)
+		targets = if myTurn then ChessRules.legalMovesFrom(stateOf(game_), r, c) else premoveTargets(r, c)
 	else
 		selected, targets = nil, {}
 	end
@@ -649,7 +825,7 @@ view:on("promote", function(kind: string)
 end)
 
 view:on("resign", function()
-	if resignArmed then
+	if resignArmed or not settings.confirmResign then
 		resignArmed = false
 		chessEvent:FireServer("resign")
 	else
@@ -675,12 +851,13 @@ end)
 chessEvent.OnClientEvent:Connect(function(action: string, data)
 	data = data or {}
 	if action == "invite" then
-		invites[data.from] = { name = data.name, expires = now() + (data.seconds or 30) }
+		invites[data.from] = { name = data.name, expires = now() + (data.seconds or 30), modeName = data.modeName }
+		local what = "chess" .. (if data.modeName then " (" .. data.modeName .. ")" else "")
 		if isOpen then
 			bannerFrom = data.from
-			view:showBanner(data.name, "challenged you to chess", true)
+			view:showBanner(data.name, "challenged you to " .. what, true)
 		else
-			showToast("♟  " .. data.name .. " challenged you to chess — press M to answer", 6)
+			showToast("♟  " .. data.name .. " challenged you to " .. what .. " — press M to answer", 6)
 		end
 	elseif action == "inviteGone" then
 		invites[data.from] = nil
@@ -692,7 +869,7 @@ chessEvent.OnClientEvent:Connect(function(action: string, data)
 		if data.status == "cancelled" then
 			outgoing = nil
 		else
-			outgoing = { to = data.to, name = data.name, status = data.status, expires = now() + (data.seconds or 0) }
+			outgoing = { to = data.to, name = data.name, status = data.status, expires = now() + (data.seconds or 0), modeName = data.modeName }
 			if data.status ~= "waiting" and isOpen then
 				bannerFrom = nil
 				view:showBanner(data.name, outgoingText(), false)
@@ -705,29 +882,64 @@ chessEvent.OnClientEvent:Connect(function(action: string, data)
 		end
 	elseif action == "state" then
 		local isNew = not game_ or game_.id ~= data.id
+		local before = game_
 		game_ = data
 		myColor = if data.white.id == player.UserId then "w" else "b"
+		clockBase = if data.clock then { w = data.clock.w, b = data.clock.b, running = data.clock.running, at = now() } else nil
 		if isNew then
-			selected, targets, pendingPromotion = nil, {}, nil
+			selected, targets, pendingPromotion, premove = nil, {}, nil, nil
 			outgoing = nil
-			local opponent = if myColor == "w" then data.black.name else data.white.name
-			if isOpen then
-				view:showPage("chess")
-				view:hideBanner()
+			if spectating() then
+				if isOpen then
+					view:showPage("chess")
+				end
 			else
-				showToast("♟  Your chess game with " .. opponent .. " started — press M", 6)
+				local opponent = if myColor == "w" then data.black.name else data.white.name
+				if isOpen then
+					view:showPage("chess")
+					view:hideBanner()
+				else
+					showToast("♟  Your chess game with " .. opponent .. " started — press M", 6)
+				end
 			end
 		end
-		-- a move by the opponent can make a selection stale
-		if selected and (game_.turn ~= myColor or game_.board[selected[1]][selected[2]] == "") then
-			selected, targets = nil, {}
+		local justMoved = before and not isNew and #(before.moves or {}) ~= #(data.moves or {})
+		-- your turn now: play the premove if it's still legal
+		if premove and not data.over and data.turn == myColor and not spectating() then
+			local pm = premove
+			premove = nil
+			local m = ChessRules.findMove(stateOf(data), pm.fr, pm.fc, pm.tr, pm.tc, "Q")
+			if m then
+				sendMove(m, if m.promo then "Q" else nil)
+			end
+		end
+		-- a move can make a selection stale
+		if selected and (justMoved or game_.board[selected[1]][selected[2]] == "") then
+			local sr, sc = selected[1], selected[2]
+			if game_.board[sr][sc] ~= "" and string.sub(game_.board[sr][sc], 1, 1) == myColor and not game_.over then
+				targets = if game_.turn == myColor then ChessRules.legalMovesFrom(stateOf(game_), sr, sc) else premoveTargets(sr, sc)
+			else
+				selected, targets = nil, {}
+			end
 		end
 		if data.over then
 			resignArmed = false
+			premove = nil
+			if isOpen and not spectating() and data.rewards and data.rewards[tostring(player.UserId)] and before and not before.over then
+				showToast("♟  You won! +" .. data.rewards[tostring(player.UserId)] .. " points", 5)
+			end
 		end
 	elseif action == "noGame" then
 		game_ = nil
-		selected, targets, pendingPromotion = nil, {}, nil
+		clockBase = nil
+		selected, targets, pendingPromotion, premove = nil, {}, nil, nil
+	elseif action == "games" then
+		liveGames = {}
+		for _, g in ipairs(data) do
+			if not (game_ and game_.id == g.id) then
+				table.insert(liveGames, g)
+			end
+		end
 	end
 	if isOpen and view.currentPage == "chess" then
 		renderChess()
@@ -791,6 +1003,9 @@ local lastTick = 0
 RunService.RenderStepped:Connect(function()
 	if not isOpen then
 		return
+	end
+	if game_ and clockBase and view.currentPage == "chess" then
+		view:updateClocks(currentClocks(), bottomColor())
 	end
 	local t = now()
 	if t - lastTick < 1 then

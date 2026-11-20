@@ -552,6 +552,63 @@ end
 
 ---------------------------------------------------------------- chess
 
+-- board colour themes (light square, dark square, coordinate text)
+TabletView.BOARD_THEMES = {
+	{ key = "wood", name = "Wood", light = Color3.fromRGB(238, 216, 182), dark = Color3.fromRGB(176, 133, 96), coord = Color3.fromRGB(90, 60, 40) },
+	{ key = "green", name = "Green", light = Color3.fromRGB(235, 236, 208), dark = Color3.fromRGB(115, 149, 82), coord = Color3.fromRGB(70, 90, 50) },
+	{ key = "blue", name = "Blue", light = Color3.fromRGB(222, 227, 230), dark = Color3.fromRGB(140, 162, 173), coord = Color3.fromRGB(70, 90, 110) },
+	{ key = "gray", name = "Gray", light = Color3.fromRGB(200, 200, 204), dark = Color3.fromRGB(120, 120, 128), coord = Color3.fromRGB(60, 60, 66) },
+}
+local THEME_BY_KEY = {}
+for _, t in ipairs(TabletView.BOARD_THEMES) do
+	THEME_BY_KEY[t.key] = t
+end
+
+TabletView.TIME_CHOICES = {
+	{ key = "bullet", name = "Bullet 1|0" },
+	{ key = "blitz", name = "Blitz 3|2" },
+	{ key = "rapid", name = "Rapid 10|0" },
+	{ key = "none", name = "No clock" },
+}
+TabletView.VARIANT_CHOICES = {
+	{ key = "standard", name = "Standard" },
+	{ key = "chess960", name = "Chess960" },
+	{ key = "koth", name = "King of the Hill" },
+	{ key = "threecheck", name = "3-Check" },
+}
+-- on/off settings, in the order they are listed
+TabletView.TOGGLES = {
+	{ key = "legalMoves", name = "Show legal moves" },
+	{ key = "lastMove", name = "Highlight last move" },
+	{ key = "coordinates", name = "Show coordinates" },
+	{ key = "premoves", name = "Allow premoves" },
+	{ key = "autoQueen", name = "Always promote to queen" },
+	{ key = "confirmResign", name = "Tap twice to resign" },
+	{ key = "flip", name = "Flip the board" },
+}
+
+local PREMOVE = Color3.fromRGB(230, 90, 90)
+
+-- a row of choice chips; returns { [key] = button }
+local function chipRow(parent: Instance, y: number, title: string, choices, onPick: (string) -> ()): { [string]: TextButton }
+	label({ Position = UDim2.fromScale(0.04, y + 0.012), Size = UDim2.fromScale(0.1, 0.05), TextColor3 = C.sub, Text = title, Parent = parent })
+	local chips = {}
+	for i, choice in ipairs(choices) do
+		local b = button({
+			Name = choice.key,
+			Text = choice.name,
+			Position = UDim2.fromScale(0.14 + (i - 1) * 0.2, y),
+			Size = UDim2.fromScale(0.19, 0.07),
+		}, C.card, C.text)
+		b.Parent = parent
+		b.Activated:Connect(function()
+			onPick(choice.key)
+		end)
+		chips[choice.key] = b
+	end
+	return chips
+end
+
 function TabletView:_buildChess(pages: Frame): Frame
 	local page = new("Frame", {
 		Name = "Chess",
@@ -561,30 +618,43 @@ function TabletView:_buildChess(pages: Frame): Frame
 		Visible = false,
 		Parent = pages,
 	})
+	self.chessPage = page
 
 	-- lobby -------------------------------------------------------------
 	local lobby = new("Frame", { Name = "Lobby", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Parent = page })
-	label({ Position = UDim2.fromScale(0.04, 0.03), Size = UDim2.fromScale(0.5, 0.08), FontFace = FONT_BOLD, Text = "Chess", Parent = lobby })
+	label({ Position = UDim2.fromScale(0.04, 0.025), Size = UDim2.fromScale(0.5, 0.075), FontFace = FONT_BOLD, Text = "Chess", Parent = lobby })
 	label({
-		Position = UDim2.fromScale(0.04, 0.115),
-		Size = UDim2.fromScale(0.6, 0.045),
+		Position = UDim2.fromScale(0.04, 0.1),
+		Size = UDim2.fromScale(0.7, 0.04),
 		TextColor3 = C.sub,
-		Text = "Challenge someone on the train to a game",
+		Text = "Pick a mode, then challenge someone or the computer. Win = +50 points",
 		Parent = lobby,
 	})
+	local gear = button({ Name = "Settings", Text = "⚙ Settings", AnchorPoint = Vector2.new(1, 0), Position = UDim2.fromScale(0.96, 0.03), Size = UDim2.fromScale(0.17, 0.07) }, C.card)
+	gear.Parent = lobby
+	gear.Activated:Connect(function()
+		self:_fire("settings")
+	end)
+
+	self.timeChips = chipRow(lobby, 0.16, "Time", TabletView.TIME_CHOICES, function(key)
+		self:_fire("pickTime", key)
+	end)
+	self.variantChips = chipRow(lobby, 0.245, "Variant", TabletView.VARIANT_CHOICES, function(key)
+		self:_fire("pickVariant", key)
+	end)
 
 	local playersCard = new("Frame", {
 		Name = "PlayersCard",
-		Position = UDim2.fromScale(0.04, 0.2),
-		Size = UDim2.fromScale(0.54, 0.72),
+		Position = UDim2.fromScale(0.04, 0.345),
+		Size = UDim2.fromScale(0.54, 0.62),
 		BackgroundColor3 = C.card,
 		Parent = lobby,
 	}, { corner(UDim.new(0.05, 0)), stroke(C.cardLine, 1, 0.3) })
-	label({ Position = UDim2.fromScale(0.05, 0.04), Size = UDim2.fromScale(0.9, 0.07), FontFace = FONT_BOLD, Text = "Players on the train", Parent = playersCard })
+	label({ Position = UDim2.fromScale(0.05, 0.035), Size = UDim2.fromScale(0.9, 0.075), FontFace = FONT_BOLD, Text = "Play", Parent = playersCard })
 	self.playerList = new("ScrollingFrame", {
 		Name = "List",
 		Position = UDim2.fromScale(0.03, 0.14),
-		Size = UDim2.fromScale(0.94, 0.82),
+		Size = UDim2.fromScale(0.94, 0.83),
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		ScrollBarThickness = 4,
@@ -595,16 +665,16 @@ function TabletView:_buildChess(pages: Frame): Frame
 
 	local invitesCard = new("Frame", {
 		Name = "InvitesCard",
-		Position = UDim2.fromScale(0.61, 0.2),
-		Size = UDim2.fromScale(0.35, 0.72),
+		Position = UDim2.fromScale(0.61, 0.345),
+		Size = UDim2.fromScale(0.35, 0.33),
 		BackgroundColor3 = C.card,
 		Parent = lobby,
-	}, { corner(UDim.new(0.07, 0)), stroke(C.cardLine, 1, 0.3) })
-	label({ Position = UDim2.fromScale(0.07, 0.04), Size = UDim2.fromScale(0.86, 0.07), FontFace = FONT_BOLD, Text = "Challenges", Parent = invitesCard })
+	}, { corner(UDim.new(0.08, 0)), stroke(C.cardLine, 1, 0.3) })
+	label({ Position = UDim2.fromScale(0.07, 0.05), Size = UDim2.fromScale(0.86, 0.14), FontFace = FONT_BOLD, Text = "Challenges", Parent = invitesCard })
 	self.inviteList = new("ScrollingFrame", {
 		Name = "List",
-		Position = UDim2.fromScale(0.05, 0.14),
-		Size = UDim2.fromScale(0.9, 0.6),
+		Position = UDim2.fromScale(0.05, 0.23),
+		Size = UDim2.fromScale(0.9, 0.52),
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		ScrollBarThickness = 4,
@@ -614,14 +684,34 @@ function TabletView:_buildChess(pages: Frame): Frame
 	}, { new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }) })
 	self.outgoingLabel = label({
 		Name = "Outgoing",
-		Position = UDim2.fromScale(0.07, 0.78),
-		Size = UDim2.fromScale(0.86, 0.18),
+		Position = UDim2.fromScale(0.07, 0.77),
+		Size = UDim2.fromScale(0.86, 0.2),
 		TextColor3 = C.sub,
 		TextWrapped = true,
 		TextYAlignment = Enum.TextYAlignment.Top,
 		Text = "",
 		Parent = invitesCard,
 	})
+
+	local liveCard = new("Frame", {
+		Name = "LiveCard",
+		Position = UDim2.fromScale(0.61, 0.695),
+		Size = UDim2.fromScale(0.35, 0.27),
+		BackgroundColor3 = C.card,
+		Parent = lobby,
+	}, { corner(UDim.new(0.08, 0)), stroke(C.cardLine, 1, 0.3) })
+	label({ Position = UDim2.fromScale(0.07, 0.06), Size = UDim2.fromScale(0.86, 0.17), FontFace = FONT_BOLD, Text = "👁 Live games", Parent = liveCard })
+	self.liveList = new("ScrollingFrame", {
+		Name = "List",
+		Position = UDim2.fromScale(0.05, 0.29),
+		Size = UDim2.fromScale(0.9, 0.66),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 4,
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		Parent = liveCard,
+	}, { new("UIListLayout", { Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder }) })
 	self.lobby = lobby
 
 	-- game --------------------------------------------------------------
@@ -705,6 +795,10 @@ function TabletView:_buildChess(pages: Frame): Frame
 			sq.Activated:Connect(function()
 				self:_fire("square", row, col)
 			end)
+			-- right-click cancels a premove (like chess.com)
+			sq.MouseButton2Click:Connect(function()
+				self:_fire("cancelPremove")
+			end)
 		end
 	end
 	self.board = board
@@ -712,12 +806,12 @@ function TabletView:_buildChess(pages: Frame): Frame
 	-- side panel
 	local side = new("Frame", {
 		Name = "Side",
-		Position = UDim2.fromScale(0.6, 0.05),
-		Size = UDim2.fromScale(0.37, 0.9),
+		Position = UDim2.fromScale(0.6, 0.04),
+		Size = UDim2.fromScale(0.37, 0.92),
 		BackgroundTransparency = 1,
 		Parent = gameFrame,
 	})
-	local function playerCard(name: string, y: number): (Frame, TextLabel, Frame, TextLabel)
+	local function playerCard(name: string, y: number)
 		local card = new("Frame", {
 			Name = name,
 			Position = UDim2.fromScale(0, y),
@@ -728,32 +822,56 @@ function TabletView:_buildChess(pages: Frame): Frame
 		local swatch = new("Frame", {
 			Name = "Swatch",
 			AnchorPoint = Vector2.new(0, 0.5),
-			Position = UDim2.fromScale(0.05, 0.5),
+			Position = UDim2.fromScale(0.04, 0.5),
 			Size = UDim2.fromScale(0.09, 0.5),
 			BackgroundColor3 = Color3.new(1, 1, 1),
 			Parent = card,
 		}, { new("UIAspectRatioConstraint", { AspectRatio = 1 }), corner(UDim.new(0.5, 0)), stroke(Color3.fromRGB(120, 120, 120), 1) })
-		local nameLabel = label({ Position = UDim2.fromScale(0.2, 0.2), Size = UDim2.fromScale(0.55, 0.38), FontFace = FONT_BOLD, Text = "", Parent = card })
-		local tag = label({ Position = UDim2.fromScale(0.2, 0.58), Size = UDim2.fromScale(0.75, 0.26), TextColor3 = C.sub, Text = "", Parent = card })
-		return card, nameLabel, swatch, tag
+		local nameLabel = label({ Position = UDim2.fromScale(0.17, 0.18), Size = UDim2.fromScale(0.5, 0.38), FontFace = FONT_BOLD, Text = "", Parent = card })
+		local tag = label({ Position = UDim2.fromScale(0.17, 0.58), Size = UDim2.fromScale(0.5, 0.26), TextColor3 = C.sub, Text = "", Parent = card })
+		local clockBox = new("Frame", {
+			Name = "Clock",
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.fromScale(0.97, 0.5),
+			Size = UDim2.fromScale(0.29, 0.72),
+			BackgroundColor3 = Color3.fromRGB(20, 22, 30),
+			Visible = false,
+			Parent = card,
+		}, { corner(UDim.new(0.25, 0)) })
+		local clockText = label({
+			Size = UDim2.fromScale(1, 1),
+			TextXAlignment = Enum.TextXAlignment.Center,
+			FontFace = Font.new("rbxasset://fonts/families/RobotoMono.json", Enum.FontWeight.Bold),
+			Text = "",
+			Parent = clockBox,
+		})
+		new("UIPadding", { PaddingTop = UDim.new(0.18, 0), PaddingBottom = UDim.new(0.18, 0), PaddingLeft = UDim.new(0.06, 0), PaddingRight = UDim.new(0.06, 0), Parent = clockBox })
+		return { card = card, name = nameLabel, swatch = swatch, tag = tag, clock = clockBox, clockText = clockText }
 	end
-	local oppCard, oppName, oppSwatch, oppTag = playerCard("Opponent", 0)
-	local meCard, meName, meSwatch, meTag = playerCard("You", 0.66)
-	self.oppCard, self.oppName, self.oppSwatch, self.oppTag = oppCard, oppName, oppSwatch, oppTag
-	self.meCard, self.meName, self.meSwatch, self.meTag = meCard, meName, meSwatch, meTag
+	self.oppCardInfo = playerCard("Opponent", 0)
+	self.meCardInfo = playerCard("You", 0.68)
 
 	self.statusLabel = label({
 		Name = "Status",
-		Position = UDim2.fromScale(0, 0.14),
-		Size = UDim2.fromScale(1, 0.08),
+		Position = UDim2.fromScale(0, 0.135),
+		Size = UDim2.fromScale(1, 0.065),
 		FontFace = FONT_BOLD,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		Text = "",
+		Parent = side,
+	})
+	self.modeLabel = label({
+		Name = "Mode",
+		Position = UDim2.fromScale(0, 0.205),
+		Size = UDim2.fromScale(1, 0.04),
+		TextColor3 = C.sub,
 		TextXAlignment = Enum.TextXAlignment.Center,
 		Text = "",
 		Parent = side,
 	})
 	local movesCard = new("Frame", {
 		Name = "Moves",
-		Position = UDim2.fromScale(0, 0.24),
+		Position = UDim2.fromScale(0, 0.26),
 		Size = UDim2.fromScale(1, 0.4),
 		BackgroundColor3 = C.card,
 		Parent = side,
@@ -770,26 +888,26 @@ function TabletView:_buildChess(pages: Frame): Frame
 		Parent = movesCard,
 	}, { new("UIListLayout", { Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder }) })
 
-	self.resignButton = button({
-		Name = "Resign",
-		Text = "Resign",
-		Position = UDim2.fromScale(0, 0.81),
-		Size = UDim2.fromScale(1, 0.1),
-	}, Color3.fromRGB(70, 30, 34), Color3.fromRGB(255, 120, 110))
+	-- buttons: [Resign] [Draw] [⚙] while playing; [Back]/[Stop watching] [⚙] otherwise
+	self.resignButton = button({ Name = "Resign", Text = "Resign", Position = UDim2.fromScale(0, 0.84), Size = UDim2.fromScale(0.41, 0.1) }, Color3.fromRGB(70, 30, 34), Color3.fromRGB(255, 120, 110))
 	self.resignButton.Parent = side
 	self.resignButton.Activated:Connect(function()
 		self:_fire("resign")
 	end)
-	self.backButton = button({
-		Name = "Back",
-		Text = "Back to lobby",
-		Position = UDim2.fromScale(0, 0.81),
-		Size = UDim2.fromScale(1, 0.1),
-		Visible = false,
-	}, C.blue)
+	self.drawButton = button({ Name = "Draw", Text = "Offer draw", Position = UDim2.fromScale(0.44, 0.84), Size = UDim2.fromScale(0.39, 0.1) }, C.gray)
+	self.drawButton.Parent = side
+	self.drawButton.Activated:Connect(function()
+		self:_fire("draw")
+	end)
+	self.backButton = button({ Name = "Back", Text = "Back to lobby", Position = UDim2.fromScale(0, 0.84), Size = UDim2.fromScale(0.83, 0.1), Visible = false }, C.blue)
 	self.backButton.Parent = side
 	self.backButton.Activated:Connect(function()
 		self:_fire("leaveGame")
+	end)
+	local gameGear = button({ Name = "Settings", Text = "⚙", Position = UDim2.fromScale(0.86, 0.84), Size = UDim2.fromScale(0.14, 0.1) }, C.card)
+	gameGear.Parent = side
+	gameGear.Activated:Connect(function()
+		self:_fire("settings")
 	end)
 
 	-- promotion picker
@@ -821,7 +939,120 @@ function TabletView:_buildChess(pages: Frame): Frame
 	end
 	self.promoFrame = promo
 	self.gameFrame = gameFrame
+
+	self:_buildChessSettings(page)
 	return page
+end
+
+-- the settings panel (over the lobby or the game)
+function TabletView:_buildChessSettings(page: Frame)
+	local shade = new("TextButton", {
+		Name = "SettingsShade",
+		Text = "",
+		AutoButtonColor = false,
+		Size = UDim2.fromScale(1, 1),
+		BackgroundColor3 = Color3.new(0, 0, 0),
+		BackgroundTransparency = 0.45,
+		Visible = false,
+		ZIndex = 20,
+		Parent = page,
+	})
+	local panel = new("Frame", {
+		Name = "Panel",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromScale(0.62, 0.9),
+		BackgroundColor3 = C.card,
+		Active = true, -- clicks on the panel don't fall through and close it
+		ZIndex = 21,
+		Parent = shade,
+	}, { corner(UDim.new(0.05, 0)), stroke(C.cardLine, 1, 0.2) })
+	local function z(inst)
+		inst.ZIndex = 22
+		return inst
+	end
+	z(label({ Position = UDim2.fromScale(0.06, 0.035), Size = UDim2.fromScale(0.6, 0.075), FontFace = FONT_BOLD, Text = "Chess settings", Parent = panel }))
+	z(label({ Position = UDim2.fromScale(0.06, 0.135), Size = UDim2.fromScale(0.3, 0.05), TextColor3 = C.sub, Text = "Board", Parent = panel }))
+	self.themeChips = {}
+	for i, theme in ipairs(TabletView.BOARD_THEMES) do
+		local chip = z(new("TextButton", {
+			Name = theme.key,
+			Text = "",
+			AutoButtonColor = true,
+			Position = UDim2.fromScale(0.3 + (i - 1) * 0.165, 0.12),
+			Size = UDim2.fromScale(0.14, 0.08),
+			BackgroundColor3 = theme.dark,
+			Parent = panel,
+		}, { corner(UDim.new(0.2, 0)) }))
+		-- half light, half dark, with the name on top
+		z(new("Frame", { Size = UDim2.fromScale(0.5, 1), BackgroundColor3 = theme.light, BorderSizePixel = 0, Parent = chip }, { corner(UDim.new(0.2, 0)) }))
+		z(label({ Position = UDim2.fromScale(0, 0.25), Size = UDim2.fromScale(1, 0.5), TextXAlignment = Enum.TextXAlignment.Center, TextColor3 = Color3.fromRGB(20, 20, 24), FontFace = FONT_BOLD, Text = theme.name, Parent = chip }))
+		local ring = new("UIStroke", { Color = C.selected, Thickness = 0, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = chip })
+		chip.Activated:Connect(function()
+			self:_fire("setting", "theme", theme.key)
+		end)
+		self.themeChips[theme.key] = ring
+	end
+	self.toggleSwitches = {}
+	for i, t in ipairs(TabletView.TOGGLES) do
+		local y = 0.23 + (i - 1) * 0.085
+		local row = z(new("TextButton", {
+			Name = t.key,
+			Text = "",
+			AutoButtonColor = true,
+			Position = UDim2.fromScale(0.05, y),
+			Size = UDim2.fromScale(0.9, 0.072),
+			BackgroundColor3 = Color3.fromRGB(38, 42, 56),
+			Parent = panel,
+		}, { corner(UDim.new(0.25, 0)) }))
+		z(label({ Position = UDim2.fromScale(0.04, 0.2), Size = UDim2.fromScale(0.7, 0.6), FontFace = FONT_MED, Text = t.name, Parent = row }))
+		local track = z(new("Frame", {
+			Name = "Switch",
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.fromScale(0.97, 0.5),
+			Size = UDim2.fromScale(0.11, 0.7),
+			BackgroundColor3 = C.gray,
+			Parent = row,
+		}, { corner(UDim.new(0.5, 0)) }))
+		local knob = z(new("Frame", {
+			Name = "Knob",
+			AnchorPoint = Vector2.new(0, 0.5),
+			Position = UDim2.fromScale(0.06, 0.5),
+			Size = UDim2.fromScale(0.42, 0.8),
+			BackgroundColor3 = Color3.new(1, 1, 1),
+			Parent = track,
+		}, { new("UIAspectRatioConstraint", { AspectRatio = 1 }), corner(UDim.new(0.5, 0)) }))
+		knob.ZIndex = 23
+		row.Activated:Connect(function()
+			self:_fire("setting", t.key, nil) -- nil = flip it
+		end)
+		self.toggleSwitches[t.key] = { track = track, knob = knob }
+	end
+	local done = button({ Name = "Done", Text = "Done", AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.fromScale(0.5, 0.86), Size = UDim2.fromScale(0.4, 0.1) }, C.blue)
+	done.ZIndex = 22
+	done.Parent = panel
+	done.Activated:Connect(function()
+		self:_fire("closeSettings")
+	end)
+	shade.Activated:Connect(function()
+		self:_fire("closeSettings")
+	end)
+	self.settingsShade = shade
+end
+
+function TabletView:showChessSettings(visible: boolean, settings)
+	self.settingsShade.Visible = visible
+	if not visible or not settings then
+		return
+	end
+	for key, ring in pairs(self.themeChips) do
+		ring.Thickness = if settings.theme == key then 3 else 0
+	end
+	for key, sw in pairs(self.toggleSwitches) do
+		local on = settings[key] == true
+		sw.track.BackgroundColor3 = if on then C.green else C.gray
+		sw.knob.Position = if on then UDim2.fromScale(0.52, 0.5) else UDim2.fromScale(0.06, 0.5)
+	end
 end
 
 function TabletView:showChessScreen(which: string) -- "lobby" or "game"
@@ -857,13 +1088,53 @@ local function avatarCircle(parent: Instance, userId: number, name: string, thum
 end
 
 -- players: { {id, name, state = "free"|"waiting"} }
--- invites: { {from, name, seconds} }
-function TabletView:renderLobby(players, invites, outgoingText: string, thumbnails: { [number]: string })
+-- invites: { {from, name, seconds, modeName} }
+-- live:    { {id, white, black, modeName, moves, bot} }
+-- mode:    { time, variant } picked in the lobby
+function TabletView:renderLobby(players, invites, outgoingText: string, thumbnails: { [number]: string }, live, mode)
+	for key, chip in pairs(self.timeChips) do
+		chip.BackgroundColor3 = if mode and mode.time == key then C.blue else C.card
+	end
+	for key, chip in pairs(self.variantChips) do
+		chip.BackgroundColor3 = if mode and mode.variant == key then C.blue else C.card
+	end
+
 	clear(self.playerList)
+	-- the computer is always there
+	local bot = new("Frame", {
+		Name = "Computer",
+		LayoutOrder = 0,
+		Size = UDim2.new(1, -6, 0, 44),
+		BackgroundColor3 = Color3.fromRGB(44, 40, 66),
+		Parent = self.playerList,
+	}, { corner(UDim.new(0.25, 0)) })
+	local botFace = new("Frame", {
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.fromScale(0.02, 0.5),
+		Size = UDim2.fromScale(0.12, 0.8),
+		BackgroundColor3 = Color3.fromRGB(90, 70, 150),
+		Parent = bot,
+	}, { new("UIAspectRatioConstraint", { AspectRatio = 1 }), corner(UDim.new(0.5, 0)) })
+	label({ Size = UDim2.fromScale(1, 1), Text = "🤖", TextXAlignment = Enum.TextXAlignment.Center, Parent = botFace })
+	label({ Position = UDim2.fromScale(0.17, 0.25), Size = UDim2.fromScale(0.3, 0.5), FontFace = FONT_MED, Text = "Computer", Parent = bot })
+	for i, level in ipairs({ { "easy", "Easy" }, { "medium", "Medium" }, { "hard", "Hard" } }) do
+		local b = button({
+			Name = level[1],
+			Text = level[2],
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.fromScale(0.97 - (3 - i) * 0.17, 0.5),
+			Size = UDim2.fromScale(0.16, 0.72),
+		}, Color3.fromRGB(110, 80, 190))
+		b.Parent = bot
+		b.Activated:Connect(function()
+			self:_fire("computer", level[1])
+		end)
+	end
 	if #players == 0 then
 		label({
 			Name = "Empty",
-			Size = UDim2.new(1, 0, 0, 40),
+			LayoutOrder = 1,
+			Size = UDim2.new(1, 0, 0, 34),
 			TextColor3 = C.sub,
 			TextXAlignment = Enum.TextXAlignment.Center,
 			Text = "Nobody else is on the train yet",
@@ -873,7 +1144,7 @@ function TabletView:renderLobby(players, invites, outgoingText: string, thumbnai
 	for i, p in ipairs(players) do
 		local row = new("Frame", {
 			Name = "Player" .. p.id,
-			LayoutOrder = i,
+			LayoutOrder = i + 1,
 			Size = UDim2.new(1, -6, 0, 44),
 			BackgroundColor3 = Color3.fromRGB(38, 42, 56),
 			Parent = self.playerList,
@@ -903,7 +1174,7 @@ function TabletView:renderLobby(players, invites, outgoingText: string, thumbnai
 	if #invites == 0 then
 		label({
 			Name = "Empty",
-			Size = UDim2.new(1, 0, 0, 36),
+			Size = UDim2.new(1, 0, 0, 26),
 			TextColor3 = C.sub,
 			TextXAlignment = Enum.TextXAlignment.Center,
 			Text = "No challenges yet",
@@ -918,12 +1189,12 @@ function TabletView:renderLobby(players, invites, outgoingText: string, thumbnai
 			BackgroundColor3 = Color3.fromRGB(38, 42, 56),
 			Parent = self.inviteList,
 		}, { corner(UDim.new(0.18, 0)) })
-		label({ Position = UDim2.fromScale(0.06, 0.08), Size = UDim2.fromScale(0.9, 0.3), FontFace = FONT_BOLD, Text = inv.name, Parent = row })
+		label({ Position = UDim2.fromScale(0.06, 0.06), Size = UDim2.fromScale(0.9, 0.26), FontFace = FONT_BOLD, Text = inv.name, Parent = row })
 		self.inviteCountdowns[inv.from] = label({
-			Position = UDim2.fromScale(0.06, 0.36),
+			Position = UDim2.fromScale(0.06, 0.34),
 			Size = UDim2.fromScale(0.9, 0.2),
 			TextColor3 = C.sub,
-			Text = string.format("wants to play  ·  %ds", math.max(0, math.ceil(inv.seconds))),
+			Text = string.format("%s  ·  %ds", inv.modeName or "wants to play", math.max(0, math.ceil(inv.seconds))),
 			Parent = row,
 		})
 		local accept = button({ Text = "Accept", Position = UDim2.fromScale(0.05, 0.6), Size = UDim2.fromScale(0.43, 0.34) }, C.green)
@@ -937,7 +1208,39 @@ function TabletView:renderLobby(players, invites, outgoingText: string, thumbnai
 			self:_fire("respond", inv.from, false)
 		end)
 	end
+	self.inviteModes = {}
+	for _, inv in ipairs(invites) do
+		self.inviteModes[inv.from] = inv.modeName
+	end
 	self.outgoingLabel.Text = outgoingText
+
+	clear(self.liveList)
+	if not live or #live == 0 then
+		label({
+			Name = "Empty",
+			Size = UDim2.new(1, 0, 0, 24),
+			TextColor3 = C.sub,
+			TextXAlignment = Enum.TextXAlignment.Center,
+			Text = "No games right now",
+			Parent = self.liveList,
+		})
+	end
+	for i, g in ipairs(live or {}) do
+		local row = new("Frame", {
+			Name = "Game" .. g.id,
+			LayoutOrder = i,
+			Size = UDim2.new(1, -6, 0, 40),
+			BackgroundColor3 = Color3.fromRGB(38, 42, 56),
+			Parent = self.liveList,
+		}, { corner(UDim.new(0.25, 0)) })
+		label({ Position = UDim2.fromScale(0.05, 0.1), Size = UDim2.fromScale(0.66, 0.44), FontFace = FONT_MED, Text = g.white .. " vs " .. g.black, Parent = row })
+		label({ Position = UDim2.fromScale(0.05, 0.56), Size = UDim2.fromScale(0.66, 0.32), TextColor3 = C.sub, Text = g.modeName, Parent = row })
+		local watch = button({ Text = "Watch", AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.fromScale(0.97, 0.5), Size = UDim2.fromScale(0.27, 0.7) }, C.blue)
+		watch.Parent = row
+		watch.Activated:Connect(function()
+			self:_fire("watch", g.id)
+		end)
+	end
 end
 
 -- refresh just the countdown texts (cheaper than rebuilding the lists)
@@ -945,16 +1248,47 @@ function TabletView:updateCountdowns(secondsByFrom: { [number]: number }, outgoi
 	for from, lbl in pairs(self.inviteCountdowns or {}) do
 		local secs = secondsByFrom[from]
 		if secs and lbl.Parent then
-			lbl.Text = string.format("wants to play  ·  %ds", math.max(0, math.ceil(secs)))
+			lbl.Text = string.format("%s  ·  %ds", (self.inviteModes and self.inviteModes[from]) or "wants to play", math.max(0, math.ceil(secs)))
 		end
 	end
 	self.outgoingLabel.Text = outgoingText
 end
 
--- snap: game snapshot from the server; myColor "w"/"b"
--- selected: {r, c} or nil; targets: list of moves; status/tag strings
-function TabletView:renderGame(snap, myColor: string, selected, targets, statusText: string, statusColor: Color3?)
-	local flip = myColor == "b"
+local function clockString(seconds: number): string
+	seconds = math.max(0, seconds)
+	if seconds < 10 then
+		return string.format("0:%04.1f", math.floor(seconds * 10) / 10)
+	end
+	local s = math.ceil(seconds)
+	return string.format("%d:%02d", s // 60, s % 60)
+end
+
+-- clocks: { w, b, running } seconds left, or nil for no clock
+function TabletView:updateClocks(clocks, bottomColor: string)
+	for _, info in ipairs({ { self.meCardInfo, bottomColor }, { self.oppCardInfo, if bottomColor == "w" then "b" else "w" } }) do
+		local card, color = info[1], info[2]
+		card.clock.Visible = clocks ~= nil
+		if clocks then
+			local left = clocks[color]
+			card.clockText.Text = clockString(left)
+			local running = clocks.running == color
+			card.clock.BackgroundColor3 = if running and left < 10 then Color3.fromRGB(150, 40, 40)
+				elseif running then Color3.fromRGB(235, 236, 240)
+				else Color3.fromRGB(20, 22, 30)
+			card.clockText.TextColor3 = if running and left >= 10 then Color3.fromRGB(20, 20, 24) else C.text
+		end
+	end
+end
+
+-- snap: game snapshot from the server
+-- view: {
+--   bottom = "w"/"b" (side at the bottom), me = "w"/"b" or nil when watching,
+--   selected = {r, c}?, targets = {Move}, premove = {fr, fc, tr, tc}?,
+--   status, statusColor, settings, resignText, drawText }
+function TabletView:renderGame(snap, view)
+	local settings = view.settings or {}
+	local theme = THEME_BY_KEY[settings.theme or "wood"] or TabletView.BOARD_THEMES[1]
+	local flip = view.bottom == "b"
 	local kingR, kingC
 	if snap.inCheck then
 		for r = 1, 8 do
@@ -966,14 +1300,18 @@ function TabletView:renderGame(snap, myColor: string, selected, targets, statusT
 		end
 	end
 	local targetSet = {}
-	for _, m in ipairs(targets or {}) do
-		targetSet[m.tr * 10 + m.tc] = true
+	if settings.legalMoves ~= false then
+		for _, m in ipairs(view.targets or {}) do
+			targetSet[m.tr * 10 + m.tc] = true
+		end
 	end
+	local pre = view.premove
 	for row = 1, 8 do
 		for col = 1, 8 do
 			local r = if flip then row else 9 - row
 			local c = if flip then 9 - col else col
 			local sq = self.squares[row][col]
+			sq.button.BackgroundColor3 = if (row + col) % 2 == 0 then theme.light else theme.dark
 			local code = snap.board[r][c]
 			if sq.code ~= code then
 				sq.code = code
@@ -987,11 +1325,15 @@ function TabletView:renderGame(snap, myColor: string, selected, targets, statusT
 			-- highlight
 			local hl = sq.highlight
 			hl.BackgroundTransparency = 1
-			if snap.last and ((snap.last.fr == r and snap.last.fc == c) or (snap.last.tr == r and snap.last.tc == c)) then
+			if settings.lastMove ~= false and snap.last and ((snap.last.fr == r and snap.last.fc == c) or (snap.last.tr == r and snap.last.tc == c)) then
 				hl.BackgroundColor3 = C.lastMove
 				hl.BackgroundTransparency = 0.45
 			end
-			if selected and selected[1] == r and selected[2] == c then
+			if pre and ((pre.fr == r and pre.fc == c) or (pre.tr == r and pre.tc == c)) then
+				hl.BackgroundColor3 = PREMOVE
+				hl.BackgroundTransparency = 0.35
+			end
+			if view.selected and view.selected[1] == r and view.selected[2] == c then
 				hl.BackgroundColor3 = C.selected
 				hl.BackgroundTransparency = 0.35
 			end
@@ -1005,30 +1347,59 @@ function TabletView:renderGame(snap, myColor: string, selected, targets, statusT
 			-- coordinates
 			local rank = sq.button:FindFirstChild("Rank")
 			if rank then
-				rank.Text = tostring(r)
+				rank.Text = if settings.coordinates ~= false then tostring(r) else ""
+				rank.TextColor3 = theme.coord
 			end
 			local file = sq.button:FindFirstChild("File")
 			if file then
-				file.Text = string.sub("abcdefgh", c, c)
+				file.Text = if settings.coordinates ~= false then string.sub("abcdefgh", c, c) else ""
+				file.TextColor3 = theme.coord
 			end
 		end
 	end
 
-	local me = if myColor == "w" then snap.white else snap.black
-	local opp = if myColor == "w" then snap.black else snap.white
-	self.meName.Text = me.name .. " (you)"
-	self.oppName.Text = opp.name
-	self.meSwatch.BackgroundColor3 = if myColor == "w" then Color3.new(1, 1, 1) else Color3.fromRGB(30, 30, 34)
-	self.oppSwatch.BackgroundColor3 = if myColor == "w" then Color3.fromRGB(30, 30, 34) else Color3.new(1, 1, 1)
-	local myTurn = snap.turn == myColor and not snap.over
-	self.meTag.Text = if myColor == "w" then "White" else "Black"
-	self.oppTag.Text = (if myColor == "w" then "Black" else "White") .. (if not myTurn and not snap.over then "  ·  thinking…" else "")
-	self.meCard.BackgroundColor3 = if myTurn then Color3.fromRGB(34, 60, 44) else C.card
-	self.oppCard.BackgroundColor3 = if (not myTurn and not snap.over) then Color3.fromRGB(34, 60, 44) else C.card
-	self.statusLabel.Text = statusText
-	self.statusLabel.TextColor3 = statusColor or C.text
-	self.resignButton.Visible = not snap.over
-	self.backButton.Visible = snap.over
+	local bottom = view.bottom
+	local top = if bottom == "w" then "b" else "w"
+	local function sideInfo(color: string)
+		return if color == "w" then snap.white else snap.black
+	end
+	local function tagFor(color: string): string
+		local text = if color == "w" then "White" else "Black"
+		if snap.variant == "threecheck" and snap.checks then
+			text ..= string.format("  ·  checks %d/3", snap.checks[color] or 0)
+		end
+		if snap.turn == color and not snap.over then
+			text ..= if view.me == color then "  ·  your move" else "  ·  to move"
+		end
+		return text
+	end
+	for _, pair in ipairs({ { self.meCardInfo, bottom }, { self.oppCardInfo, top } }) do
+		local card, color = pair[1], pair[2]
+		local who = sideInfo(color)
+		card.name.Text = who.name .. (if view.me == color then " (you)" else "")
+		card.swatch.BackgroundColor3 = if color == "w" then Color3.new(1, 1, 1) else Color3.fromRGB(30, 30, 34)
+		card.tag.Text = tagFor(color)
+		card.card.BackgroundColor3 = if (snap.turn == color and not snap.over) then Color3.fromRGB(34, 60, 44) else C.card
+	end
+	self.statusLabel.Text = view.status or ""
+	self.statusLabel.TextColor3 = view.statusColor or C.text
+	local modeText = snap.modeName or ""
+	if snap.variant == "koth" then
+		modeText ..= "  ·  reach the centre to win"
+	end
+	if (snap.spectators or 0) > 0 then
+		modeText ..= string.format("  ·  👁 %d", snap.spectators)
+	end
+	self.modeLabel.Text = modeText
+
+	local playing = view.me ~= nil and not snap.over
+	local vsBot = snap.white.bot or snap.black.bot
+	self.resignButton.Visible = playing
+	self.resignButton.Text = view.resignText or "Resign"
+	self.drawButton.Visible = playing and not vsBot
+	self.drawButton.Text = view.drawText or "Offer draw"
+	self.backButton.Visible = not playing
+	self.backButton.Text = if view.me == nil and not snap.over then "Stop watching" else "Back to lobby"
 
 	-- move list
 	clear(self.moveList)

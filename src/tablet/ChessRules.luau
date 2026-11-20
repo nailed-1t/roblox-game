@@ -5,6 +5,13 @@
 -- Board: board[rank][file], rank 1 = White's back rank, file 1 = "a".
 -- Each square holds "" (empty) or a colour + piece letter, e.g. "wK", "bP".
 -- Pieces: K king, Q queen, R rook, B bishop, N knight, P pawn.
+--
+-- Variants (as on chess.com):
+--   "standard"
+--   "chess960"   the back row is shuffled (bishops on opposite colours, king
+--                between the rooks); castle by moving the king onto the rook
+--   "koth"       King of the Hill: walk your king to d4, e4, d5 or e5 to win
+--   "threecheck" give check three times to win
 
 local ChessRules = {}
 
@@ -23,7 +30,21 @@ export type State = {
 	ep: { number }?, -- en-passant target square {rank, file}
 	halfmove: number, -- moves since the last capture or pawn move (50-move rule)
 	fullmove: number,
+	variant: string?, -- see above; nil means "standard"
+	kingFile: number?, -- where the kings start (5 = e, except in Chess960)
+	rookFiles: { K: number, Q: number }?, -- where the castling rooks start
+	checks: { w: number, b: number }?, -- checks given so far (three-check)
 }
+
+ChessRules.VARIANTS = { "standard", "chess960", "koth", "threecheck" }
+ChessRules.VARIANT_NAMES = {
+	standard = "Standard",
+	chess960 = "Chess960",
+	koth = "King of the Hill",
+	threecheck = "3-Check",
+}
+-- results where the side that just moved wins
+ChessRules.WINS = { checkmate = true, hill = true, threecheck = true }
 
 local FILES = "abcdefgh"
 local KNIGHT = { { 1, 2 }, { 2, 1 }, { -1, 2 }, { -2, 1 }, { 1, -2 }, { 2, -1 }, { -1, -2 }, { -2, -1 } }
@@ -45,7 +66,35 @@ function ChessRules.squareName(r: number, c: number): string
 	return string.sub(FILES, c, c) .. tostring(r)
 end
 
-function ChessRules.newGame(): State
+-- A Chess960 back row (one of the 960 starting positions), from a seed.
+function ChessRules.backRank960(seed: number?): { string }
+	local rng = Random.new(seed)
+	local back: { string } = {}
+	-- bishops on one light and one dark square
+	back[rng:NextInteger(0, 3) * 2 + 1] = "B"
+	back[rng:NextInteger(0, 3) * 2 + 2] = "B"
+	local function free(): { number }
+		local list = {}
+		for c = 1, 8 do
+			if not back[c] then
+				table.insert(list, c)
+			end
+		end
+		return list
+	end
+	local f = free()
+	back[table.remove(f, rng:NextInteger(1, #f))] = "Q"
+	f = free()
+	back[table.remove(f, rng:NextInteger(1, #f))] = "N"
+	f = free()
+	back[table.remove(f, rng:NextInteger(1, #f))] = "N"
+	-- the three squares left get rook, king, rook in that order
+	f = free()
+	back[f[1]], back[f[2]], back[f[3]] = "R", "K", "R"
+	return back
+end
+
+function ChessRules.newGame(variant: string?, seed: number?): State
 	local board = {}
 	for r = 1, 8 do
 		board[r] = {}
@@ -53,7 +102,22 @@ function ChessRules.newGame(): State
 			board[r][c] = ""
 		end
 	end
-	local back = { "R", "N", "B", "Q", "K", "B", "N", "R" }
+	local back = if variant == "chess960" then ChessRules.backRank960(seed) else { "R", "N", "B", "Q", "K", "B", "N", "R" }
+	local kingFile, rookQ, rookK = 5, 1, 8
+	for c = 1, 8 do
+		if back[c] == "K" then
+			kingFile = c
+		end
+	end
+	for c = 1, 8 do
+		if back[c] == "R" then
+			if c < kingFile then
+				rookQ = c
+			else
+				rookK = c
+			end
+		end
+	end
 	for c = 1, 8 do
 		board[1][c] = "w" .. back[c]
 		board[2][c] = "wP"
@@ -67,6 +131,10 @@ function ChessRules.newGame(): State
 		ep = nil,
 		halfmove = 0,
 		fullmove = 1,
+		variant = variant or "standard",
+		kingFile = kingFile,
+		rookFiles = { K = rookK, Q = rookQ },
+		checks = { w = 0, b = 0 },
 	}
 end
 
@@ -82,6 +150,10 @@ function ChessRules.copy(state: State): State
 		ep = if state.ep then { state.ep[1], state.ep[2] } else nil,
 		halfmove = state.halfmove,
 		fullmove = state.fullmove,
+		variant = state.variant,
+		kingFile = state.kingFile,
+		rookFiles = state.rookFiles, -- never changes, so it can be shared
+		checks = if state.checks then table.clone(state.checks) else nil,
 	}
 end
 
@@ -227,20 +299,41 @@ local function pseudoMoves(state: State, r: number, c: number): { Move }
 		end
 		if kind == "K" then
 			local home = if color == "w" then 1 else 8
-			if r == home and c == 5 and not ChessRules.isAttacked(board, home, 5, enemy) then
-				-- king side
-				if state.castling[color .. "K"] and board[home][6] == "" and board[home][7] == ""
-					and board[home][8] == color .. "R"
-					and not ChessRules.isAttacked(board, home, 6, enemy)
-					and not ChessRules.isAttacked(board, home, 7, enemy) then
-					add(home, 7, { castle = "K" })
-				end
-				-- queen side
-				if state.castling[color .. "Q"] and board[home][4] == "" and board[home][3] == ""
-					and board[home][2] == "" and board[home][1] == color .. "R"
-					and not ChessRules.isAttacked(board, home, 4, enemy)
-					and not ChessRules.isAttacked(board, home, 3, enemy) then
-					add(home, 3, { castle = "Q" })
+			local kf = state.kingFile or 5
+			local rooks = state.rookFiles or { K = 8, Q = 1 }
+			if r == home and c == kf and not ChessRules.isAttacked(board, home, kf, enemy) then
+				for _, side in ipairs({ "K", "Q" }) do
+					local rf = rooks[side]
+					if state.castling[color .. side] and board[home][rf] == color .. "R" then
+						-- king ends on g or c, the rook next to it on f or d
+						local kd = if side == "K" then 7 else 3
+						local rd = if side == "K" then 6 else 4
+						local ok = true
+						-- every square either piece crosses must be empty (apart from the two of them)
+						local lo = math.min(kf, kd, rf, rd)
+						local hi = math.max(kf, kd, rf, rd)
+						for f = lo, hi do
+							if f ~= kf and f ~= rf and board[home][f] ~= "" then
+								ok = false
+								break
+							end
+						end
+						-- and the king may not pass through or land on an attacked square
+						if ok then
+							local step = if kd >= kf then 1 else -1
+							for f = kf + step, kd, step do
+								if ChessRules.isAttacked(board, home, f, enemy) then
+									ok = false
+									break
+								end
+							end
+						end
+						if ok then
+							-- in Chess960 you castle by moving the king onto the rook
+							local target = if state.variant == "chess960" then rf else kd
+							add(home, target, { castle = side })
+						end
+					end
 				end
 			end
 		end
@@ -286,22 +379,26 @@ function ChessRules.apply(state: State, move: Move): State
 	local kind = string.sub(piece, 2, 2)
 	local captured = b[move.tr][move.tc]
 
-	b[move.fr][move.fc] = ""
-	if move.enPassant then
-		b[move.fr][move.tc] = "" -- the pawn that is captured sits beside us
-		captured = other(color) .. "P"
-	end
-	if move.promo then
-		b[move.tr][move.tc] = color .. move.promo
+	local rooks = state.rookFiles or { K = 8, Q = 1 }
+	if move.castle then
+		-- lift the king and the rook, then put them on their castled squares
+		local rf = rooks[move.castle]
+		captured = ""
+		b[move.fr][move.fc] = ""
+		b[move.fr][rf] = ""
+		b[move.fr][if move.castle == "K" then 7 else 3] = color .. "K"
+		b[move.fr][if move.castle == "K" then 6 else 4] = color .. "R"
 	else
-		b[move.tr][move.tc] = piece
-	end
-	if move.castle == "K" then
-		b[move.fr][6] = b[move.fr][8]
-		b[move.fr][8] = ""
-	elseif move.castle == "Q" then
-		b[move.fr][4] = b[move.fr][1]
-		b[move.fr][1] = ""
+		b[move.fr][move.fc] = ""
+		if move.enPassant then
+			b[move.fr][move.tc] = "" -- the pawn that is captured sits beside us
+			captured = other(color) .. "P"
+		end
+		if move.promo then
+			b[move.tr][move.tc] = color .. move.promo
+		else
+			b[move.tr][move.tc] = piece
+		end
 	end
 
 	-- castling rights
@@ -310,10 +407,10 @@ function ChessRules.apply(state: State, move: Move): State
 		s.castling[color .. "Q"] = false
 	end
 	local function rookGone(r: number, c: number)
-		if r == 1 and c == 1 then s.castling.wQ = false end
-		if r == 1 and c == 8 then s.castling.wK = false end
-		if r == 8 and c == 1 then s.castling.bQ = false end
-		if r == 8 and c == 8 then s.castling.bK = false end
+		if r == 1 and c == rooks.Q then s.castling.wQ = false end
+		if r == 1 and c == rooks.K then s.castling.wK = false end
+		if r == 8 and c == rooks.Q then s.castling.bQ = false end
+		if r == 8 and c == rooks.K then s.castling.bK = false end
 	end
 	rookGone(move.fr, move.fc)
 	rookGone(move.tr, move.tc)
@@ -334,6 +431,9 @@ function ChessRules.apply(state: State, move: Move): State
 		s.fullmove += 1
 	end
 	s.turn = other(color)
+	if s.variant == "threecheck" and s.checks and ChessRules.inCheck(s, s.turn) then
+		s.checks[color] += 1
+	end
 	return s
 end
 
@@ -403,15 +503,30 @@ local function insufficientMaterial(board: { { string } }): boolean
 	return minors <= 1
 end
 
--- "playing", "checkmate", "stalemate", "fifty", "material"
+local HILL = { [44] = true, [45] = true, [54] = true, [55] = true } -- d4 e4 d5 e5
+
+-- "playing", "checkmate", "stalemate", "fifty", "material", and for the
+-- variants "hill" (a king reached the centre) and "threecheck"
+-- (see ChessRules.WINS for which of these the side that just moved wins)
 function ChessRules.status(state: State): string
+	local mover = other(state.turn)
+	if state.variant == "koth" then
+		local kr, kc = ChessRules.findKing(state.board, mover)
+		if kr and kc and HILL[kr * 10 + kc] then
+			return "hill"
+		end
+	elseif state.variant == "threecheck" and state.checks and state.checks[mover] >= 3 then
+		return "threecheck"
+	end
 	if #ChessRules.allLegalMoves(state) == 0 then
 		return if ChessRules.inCheck(state, state.turn) then "checkmate" else "stalemate"
 	end
 	if state.halfmove >= 100 then
 		return "fifty"
 	end
-	if insufficientMaterial(state.board) then
+	-- a lone king can still walk to the hill, and a knight can still give checks
+	local plain = state.variant == nil or state.variant == "standard" or state.variant == "chess960"
+	if plain and insufficientMaterial(state.board) then
 		return "material"
 	end
 	return "playing"
@@ -439,7 +554,9 @@ function ChessRules.notation(before: State, move: Move, after: State): string
 		end
 	end
 	local st = ChessRules.status(after)
-	if st == "checkmate" then
+	if ChessRules.WINS[st] and st ~= "checkmate" and ChessRules.inCheck(after, after.turn) then
+		text ..= "+"
+	elseif st == "checkmate" then
 		text ..= "#"
 	elseif ChessRules.inCheck(after, after.turn) then
 		text ..= "+"
