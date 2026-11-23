@@ -104,12 +104,15 @@ local hint = text({
 	Parent = gui,
 })
 
+local camsOpen = false -- the security cameras are up
+
 local function inMatch(): boolean
 	return player:GetAttribute("ChimeMatch") ~= nil
 end
 
 local function refreshBar()
-	local on = inMatch()
+	-- (hidden while the tablet is up; the Chime app shows the same things)
+	local on = inMatch() and not player:GetAttribute("TabletOpen") and not camsOpen
 	bar.Visible = on
 	hint.Visible = on
 	if not on then
@@ -120,7 +123,7 @@ local function refreshBar()
 	energyFill.Size = UDim2.fromScale(math.clamp(energy / ChimeShared.START_ENERGY, 0, 1), 1)
 	energyFill.BackgroundColor3 = if energy < 20 then Color3.fromRGB(255, 90, 80) else Color3.fromRGB(120, 220, 255)
 	energyText.Text = string.format("⚡ %d", math.floor(energy + 0.5))
-	coinsText.Text = string.format("🪙 %d   💀 %d", player:GetAttribute("ChimeCoins") or 0, player:GetAttribute("ChimeTokens") or 0)
+	coinsText.Text = string.format("💰 %d   💀 %d", player:GetAttribute("ChimeCoins") or 0, player:GetAttribute("ChimeTokens") or 0)
 	statusText.Text = string.format(
 		"🎭 %s   🔦 %s   🚪 %s",
 		if player:GetAttribute("ChimeMask") then "ON" else "off",
@@ -128,7 +131,7 @@ local function refreshBar()
 		if player:GetAttribute("ChimeDoor") then "SHUT" else "open"
 	)
 end
-for _, name in ipairs({ "ChimeMatch", "ChimeEnergy", "ChimeCoins", "ChimeTokens", "ChimeMask", "ChimeFlash", "ChimeDoor", "ChimeOpponent" }) do
+for _, name in ipairs({ "ChimeMatch", "ChimeEnergy", "ChimeCoins", "ChimeTokens", "ChimeMask", "ChimeFlash", "ChimeDoor", "ChimeOpponent", "TabletOpen" }) do
 	player:GetAttributeChangedSignal(name):Connect(refreshBar)
 end
 refreshBar()
@@ -267,7 +270,6 @@ end
 
 ---------------------------------------------------------------- cameras
 
-local camsOpen = false
 local camIndex = 1
 local camGui = new("Frame", {
 	Name = "Cameras",
@@ -304,7 +306,7 @@ local rec = text({
 local camList = new("Frame", {
 	AnchorPoint = Vector2.new(1, 1),
 	Position = UDim2.new(1, -24, 1, -24),
-	Size = UDim2.fromOffset(330, 230),
+	Size = UDim2.fromOffset(330, 162),
 	BackgroundColor3 = Color3.fromRGB(10, 14, 12),
 	BackgroundTransparency = 0.25,
 	ZIndex = 6,
@@ -347,9 +349,9 @@ end
 local exitCams = new("TextButton", {
 	Name = "Exit",
 	AnchorPoint = Vector2.new(1, 1),
-	Position = UDim2.new(1, -24, 1, -262),
+	Position = UDim2.new(1, -24, 1, -194),
 	Size = UDim2.fromOffset(330, 40),
-	Text = "✕ Close cameras",
+	Text = "X  Close cameras",
 	FontFace = FONT,
 	TextScaled = true,
 	TextColor3 = Color3.new(1, 1, 1),
@@ -367,6 +369,7 @@ local function closeCams()
 	camGui.Visible = false
 	camera.CameraType = Enum.CameraType.Custom
 	camera.FieldOfView = savedFov
+	refreshBar()
 end
 local function openCams()
 	if not inMatch() or player:GetAttribute("ChimeMask") then
@@ -380,6 +383,7 @@ local function openCams()
 	camGui.Visible = true
 	camera.CameraType = Enum.CameraType.Scriptable
 	showCam(camIndex)
+	refreshBar()
 end
 exitCams.Activated:Connect(closeCams)
 ChimeShared.signal("openCameras").Event:Connect(openCams)

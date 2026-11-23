@@ -387,7 +387,7 @@ function ChimeApp:_buildMatch(page: Frame)
 			Text = r.counter,
 			Parent = c,
 		})
-		local b = button({ Name = "Summon", Text = string.format("Summon · %d 🪙", r.price), Position = UDim2.fromScale(0.06, 0.72), Size = UDim2.fromScale(0.88, 0.22) }, C.accent)
+		local b = button({ Name = "Summon", Text = string.format("Summon · %d 💰", r.price), Position = UDim2.fromScale(0.06, 0.72), Size = UDim2.fromScale(0.88, 0.22) }, C.accent)
 		b.Parent = c
 		b.Activated:Connect(function()
 			fire("buy", { id = r.id })
@@ -400,7 +400,7 @@ function ChimeApp:_buildMatch(page: Frame)
 		local c = card(m, { Name = it.id, Position = UDim2.fromScale(0.04 + (i - 1) * 0.31, 0.78), Size = UDim2.fromScale(0.29, 0.17) })
 		label({ Position = UDim2.fromScale(0.05, 0.1), Size = UDim2.fromScale(0.6, 0.34), FontFace = FONT_BOLD, Text = it.icon .. " " .. it.name, Parent = c })
 		label({ Position = UDim2.fromScale(0.05, 0.52), Size = UDim2.fromScale(0.55, 0.34), TextColor3 = C.sub, TextWrapped = true, Text = it.description, Parent = c })
-		local b = button({ Name = "Buy", Text = string.format("%d 🪙", it.price), AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.fromScale(0.95, 0.5), Size = UDim2.fromScale(0.32, 0.6) }, C.green)
+		local b = button({ Name = "Buy", Text = string.format("%d 💰", it.price), AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.fromScale(0.95, 0.5), Size = UDim2.fromScale(0.32, 0.6) }, C.green)
 		b.Parent = c
 		b.Activated:Connect(function()
 			fire("buy", { id = it.id })
@@ -434,7 +434,7 @@ function ChimeApp:_renderMatch()
 	local coins = player:GetAttribute("ChimeCoins") or 0
 	local energy = player:GetAttribute("ChimeEnergy") or 0
 	self.subtitle.Text = "vs " .. tostring(player:GetAttribute("ChimeOpponent") or "?") .. " — play Snake & Minesweeper for coins"
-	self.coinsLabel.Text = string.format("🪙 %d coins", coins)
+	self.coinsLabel.Text = string.format("💰 %d coins", coins)
 	self.tokensLabel.Text = string.format("💀 × %d", player:GetAttribute("ChimeTokens") or 0)
 	self.energyBar.Size = UDim2.fromScale(math.clamp(energy / ChimeShared.START_ENERGY, 0, 1), 1)
 	self.energyBar.BackgroundColor3 = if energy < 20 then Color3.fromRGB(255, 90, 80) else C.energy

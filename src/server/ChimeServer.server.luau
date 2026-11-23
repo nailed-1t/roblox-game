@@ -65,7 +65,7 @@ local map = workspace:WaitForChild("ChimeMap")
 map:WaitForChild("Plane.004")
 
 local function send(player: Player, action: string, data: any)
-	if player and player.Parent then
+	if typeof(player) == "Instance" and player.Parent then
 		event:FireClient(player, action, data or {})
 	end
 end
@@ -529,7 +529,7 @@ endMatch = function(m, winnerSide: string?, reason: string)
 	for side, p in pairs(m.players) do
 		local result = if winnerSide == nil then "draw" elseif winnerSide == side then "win" else "lose"
 		send(p, "ended", { result = result, reason = reason, opponent = m.names[if side == "A" then "B" else "A"] })
-		if p.Parent then
+		if typeof(p) == "Instance" and p.Parent then
 			clearPlayer(p)
 		end
 	end
@@ -542,7 +542,7 @@ endMatch = function(m, winnerSide: string?, reason: string)
 	-- back to the train after a moment
 	task.delay(4, function()
 		for _, p in pairs(m.players) do
-			if p.Parent then
+			if typeof(p) == "Instance" and p.Parent then
 				p:LoadCharacter()
 			end
 		end
@@ -842,3 +842,41 @@ Players.PlayerRemoving:Connect(function(player)
 		endMatch(match, if side == "A" then "B" else "A", "left")
 	end
 end)
+
+-- Studio only: test a match on your own against a stand-in opponent, and send
+-- robots at yourself. ServerStorage.ChimeTest:Invoke("solo", player),
+-- :Invoke("summon", "glare"|"brute"|"hollow"), :Invoke("coins", player, n)
+if game:GetService("RunService"):IsStudio() then
+	local test = ServerStorage:FindFirstChild("ChimeTest") or Instance.new("BindableFunction")
+	test.Name = "ChimeTest"
+	test.Parent = ServerStorage
+	test.OnInvoke = function(command: string, a: any, b: any)
+		if command == "solo" then
+			local attrs = {}
+			local standIn = {
+				Name = "Stand-in",
+				DisplayName = "Stand-in",
+				UserId = -1,
+				Character = nil,
+				SetAttribute = function(_, k, v)
+					attrs[k] = v
+				end,
+				GetAttribute = function(_, k)
+					return attrs[k]
+				end,
+				RequestStreamAroundAsync = function() end,
+			}
+			return startMatch(a, standIn :: any)
+		elseif command == "summon" and match then
+			summon(match, "B", a)
+			return true
+		elseif command == "coins" then
+			a:SetAttribute("ChimeCoins", b)
+			return true
+		elseif command == "end" and match then
+			endMatch(match, nil, "time")
+			return true
+		end
+		return false
+	end
+end

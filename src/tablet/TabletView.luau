@@ -492,7 +492,9 @@ end
 function TabletView:setAllowedApps(allowed: { [string]: boolean }?)
 	self.allowedApps = allowed
 	for key, icon in pairs(self.appIcons or {}) do
-		icon.Visible = allowed == nil or allowed[key] == true
+		-- hide the whole slot (icon and name) so the grid closes up
+		local slot = icon.Parent :: GuiObject
+		slot.Visible = allowed == nil or allowed[key] == true
 	end
 	if self.dock then
 		self.dock.Visible = allowed == nil
