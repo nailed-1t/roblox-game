@@ -18,7 +18,7 @@
 -- Player attributes during a match (they replicate, so the tablet and the
 -- on-screen controls read them): ChimeMatch, ChimeSide ("A"/"B"),
 -- ChimeOpponent, ChimeCoins, ChimeEnergy, ChimeTokens, ChimeMask, ChimeFlash,
--- ChimeDoor.
+-- ChimeDoor (front), ChimeDoorL, ChimeDoorR (the side doors).
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -194,6 +194,115 @@ for _, side in ipairs({ "A", "B" }) do
 	barrier.Parent = matchFolder
 end
 
+-- the side doors: the doors between each room and the closets beside it
+-- (ChimeMap.Door1-4). They swing open into the closet; click one (or press
+-- Z / C) to shut it.
+local sideDoors = { A = {}, B = {} } -- [side][entry] = { model, parts, closed, ... }
+do
+	local center = map:FindFirstChild("Plane.004") :: BasePart
+	for _, model in ipairs(map:GetChildren()) do
+		local body = model:IsA("Model") and model.Name:match("^Door%d") and model:FindFirstChild("Door") :: BasePart?
+		if body then
+			local side = if body.Position.X > center.Position.X then "A" else "B"
+			local entry = if body.Position.Z > center.Position.Z then 1 else -1
+			local d = Shared.sign(side)
+			-- hinge on the edge by the back wall, swinging out into the closet
+			local hinge = CFrame.new(body.Position + Vector3.new(-d * body.Size.X / 2, 0, 0))
+			local swing = hinge * CFrame.Angles(0, math.rad(95) * d * entry, 0) * hinge:Inverse()
+			local parts = {}
+			for _, part in ipairs(model:GetDescendants()) do
+				if part:IsA("BasePart") then
+					part.Anchored = true
+					local closedCF = part:GetAttribute("ClosedCFrame") or part.CFrame
+					part:SetAttribute("ClosedCFrame", closedCF)
+					table.insert(parts, { part = part, closedCF = closedCF, openCF = swing * closedCF })
+				end
+			end
+			local click = model:FindFirstChildOfClass("ClickDetector") or Instance.new("ClickDetector")
+			click.MaxActivationDistance = 40
+			click.Parent = model
+			local sound = body:FindFirstChild("DoorSound") :: Sound? or Instance.new("Sound")
+			sound.Name = "DoorSound"
+			sound.SoundId = Shared.SOUNDS.door
+			sound.Volume = 0.8
+			sound.RollOffMaxDistance = 120
+			sound.Parent = body
+			-- players can't leave through it (robots ignore this)
+			local barrier = Instance.new("Part")
+			barrier.Name = "SideBarrier" .. side .. entry
+			barrier.Anchored = true
+			barrier.Transparency = 1
+			barrier.CanQuery = false
+			barrier.CanTouch = false
+			barrier.CastShadow = false
+			barrier.Size = Vector3.new(body.Size.X, body.Size.Y + 6, 1.2)
+			barrier.CFrame = CFrame.new(body.Position + Vector3.new(0, 3, entry * 0.9))
+			barrier.CollisionGroup = "ChimeBarrier"
+			for _, old in ipairs(matchFolder:GetChildren()) do
+				if old.Name == barrier.Name then
+					old:Destroy()
+				end
+			end
+			barrier.Parent = matchFolder
+			local rec = { model = model, part = body, parts = parts, closed = true, sound = sound, entry = entry }
+			sideDoors[side][entry] = rec
+			click.MouseClick:Connect(function(player)
+				onDoorClicked(player, side, if entry == Shared.sideEntry(side, "left") then "left" else "right")
+			end)
+		end
+	end
+end
+
+-- the door a robot coming by `entry` has to get through
+local function entryDoor(side: string, entry: number)
+	if entry == 0 then
+		return doors[side]
+	end
+	return sideDoors[side][entry]
+end
+
+local function setSideDoor(side: string, entry: number, closed: boolean, quiet: boolean?)
+	local rec = sideDoors[side][entry]
+	if not rec or rec.closed == closed then
+		return
+	end
+	rec.closed = closed
+	for _, p in ipairs(rec.parts) do
+		TweenService:Create(p.part, TweenInfo.new(0.3, Enum.EasingStyle.Quad), { CFrame = if closed then p.closedCF else p.openCF }):Play()
+	end
+	if not quiet then
+		rec.sound:Play()
+	end
+	if match and match.players[side] then
+		local name = if entry == Shared.sideEntry(side, "left") then "ChimeDoorL" else "ChimeDoorR"
+		match.players[side]:SetAttribute(name, closed)
+	end
+end
+
+local function closedDoorCount(side: string): number
+	local n = if doors[side].closed then 1 else 0
+	for _, rec in pairs(sideDoors[side]) do
+		if rec.closed then
+			n += 1
+		end
+	end
+	return n
+end
+
+local function openAllDoors(side: string, quiet: boolean?)
+	setDoor(side, false, quiet)
+	for entry in pairs(sideDoors[side]) do
+		setSideDoor(side, entry, false, quiet)
+	end
+end
+
+-- side doors start open
+for _, side in ipairs({ "A", "B" }) do
+	for entry in pairs(sideDoors[side]) do
+		setSideDoor(side, entry, false, true)
+	end
+end
+
 ---------------------------------------------------------------- robots
 -- Every player side owns one robot of each kind. They stand in their alcove
 -- (workspace.ChimeMap.Robots) and, once woken with coins, creep toward the
@@ -321,7 +430,7 @@ end
 local function setStage(r, stage: number)
 	r.stage = stage
 	local victim = if r.owner == "A" then "B" else "A"
-	r.model:PivotTo(Shared.robotSpot(r.owner, r.kind, victim, stage))
+	r.model:PivotTo(Shared.robotSpot(r.owner, r.kind, victim, stage, r.entry))
 	r.model:SetAttribute("ChimeStage", stage)
 end
 
@@ -387,6 +496,7 @@ local function removeRobot(r)
 	r.model:SetAttribute("ChimeRobotId", nil)
 	r.model:SetAttribute("ChimeState", nil)
 	setTag(r, robotInfo[r.kind].name)
+	r.entry = 0
 	setStage(r, 1)
 end
 
@@ -494,19 +604,21 @@ local function runRobot(r)
 		setStage(r, r.stage + 1)
 	end
 
-	if r.kind == "brute" and doors[victimSide].closed then
+	local door = entryDoor(victimSide, r.entry)
+	if r.kind == "brute" and door.closed then
 		-- bang on the door until it gives up (or the door opens)
 		r.model:SetAttribute("ChimeState", "banging")
 		local untilTime = os.clock() + BRUTE_BANG_SECONDS
-		local door = doors[victimSide]
 		while os.clock() < untilTime and door.closed and robotAlive(r) do
 			playAt(door.part, Shared.SOUNDS.bang, 1.5)
-			-- shake the door a little
-			door.part.CFrame = door.closedCF * CFrame.new(0, 0, (math.random() - 0.5) * 0.6)
+			-- shake the shutter a little
+			if r.entry == 0 then
+				door.part.CFrame = door.closedCF * CFrame.new(0, 0, (math.random() - 0.5) * 0.6)
+			end
 			local e = r.victim:GetAttribute("ChimeEnergy") or 0
 			r.victim:SetAttribute("ChimeEnergy", math.max(0, e - BRUTE_DRAIN))
 			task.wait(1)
-			if door.closed then
+			if door.closed and r.entry == 0 then
 				door.part.CFrame = door.closedCF
 			end
 		end
@@ -528,7 +640,7 @@ local function runRobot(r)
 			end
 			return
 		end
-		if r.kind == "brute" and doors[victimSide].closed then
+		if r.kind == "brute" and door.closed then
 			-- shut in its face at the last moment
 			send(r.victim, "toast", { text = "🚪 Brute gave up on your door." })
 			retreat(r)
@@ -573,6 +685,7 @@ local function summon(m, senderSide: string, kind: string): boolean
 	r.active = true
 	r.match = m
 	r.victim = m.players[victimSide]
+	r.entry = ({ 0, 1, -1 })[math.random(1, 3)] -- front, or one of the side doors
 	setStage(r, 1)
 	if r.victim == m.players[senderSide] then
 		r.active = false -- never hunt your own owner
@@ -600,7 +713,7 @@ local invites = {} -- [fromUserId] = { from, to, expires }
 local nextMatchId = 0
 
 local function clearPlayer(player: Player)
-	for _, name in ipairs({ "ChimeMatch", "ChimeSide", "ChimeOpponent", "ChimeCoins", "ChimeEnergy", "ChimeTokens", "ChimeMask", "ChimeFlash", "ChimeDoor" }) do
+	for _, name in ipairs({ "ChimeMatch", "ChimeSide", "ChimeOpponent", "ChimeCoins", "ChimeEnergy", "ChimeTokens", "ChimeMask", "ChimeFlash", "ChimeDoor", "ChimeDoorL", "ChimeDoorR" }) do
 		player:SetAttribute(name, nil)
 	end
 end
@@ -626,7 +739,7 @@ endMatch = function(m, winnerSide: string?, reason: string)
 		removeRobot(r)
 	end
 	for _, side in ipairs({ "A", "B" }) do
-		setDoor(side, false, true)
+		openAllDoors(side, true)
 	end
 	for side, p in pairs(m.players) do
 		local result = if winnerSide == nil then "draw" elseif winnerSide == side then "win" else "lose"
@@ -682,6 +795,8 @@ local function startMatch(a: Player, b: Player)
 		p:SetAttribute("ChimeMask", false)
 		p:SetAttribute("ChimeFlash", false)
 		p:SetAttribute("ChimeDoor", false)
+		p:SetAttribute("ChimeDoorL", false)
+		p:SetAttribute("ChimeDoorR", false)
 	end
 	for side, p in pairs(m.players) do
 		task.spawn(function()
@@ -723,9 +838,7 @@ task.spawn(function()
 				for side, p in pairs(m.players) do
 					local e = p:GetAttribute("ChimeEnergy") or 0
 					local use = 0
-					if doors[side].closed then
-						use += Shared.DOOR_DRAIN
-					end
+					use += Shared.DOOR_DRAIN * closedDoorCount(side)
 					if p:GetAttribute("ChimeFlash") then
 						use += Shared.FLASH_DRAIN
 					end
@@ -735,9 +848,9 @@ task.spawn(function()
 					end
 					if e <= 0 then
 						-- out of power: the door rolls up and the light dies
-						if doors[side].closed then
-							setDoor(side, false)
-							send(p, "toast", { text = "⚡ Out of energy! Your door opened." })
+						if closedDoorCount(side) > 0 then
+							openAllDoors(side)
+							send(p, "toast", { text = "⚡ Out of energy! Your doors opened." })
 						end
 						if p:GetAttribute("ChimeFlash") then
 							p:SetAttribute("ChimeFlash", false)
@@ -749,17 +862,26 @@ task.spawn(function()
 	end
 end)
 
-onDoorClicked = function(player: Player, side: string)
+onDoorClicked = function(player: Player, side: string, which: string?)
 	local mySide = sideOf(player)
 	if mySide ~= side or not match or match.over then
 		return
 	end
-	local closing = not doors[side].closed
+	local entry = if which == "left" or which == "right" then Shared.sideEntry(side, which) else 0
+	local door = entryDoor(side, entry)
+	if not door then
+		return
+	end
+	local closing = not door.closed
 	if closing and (player:GetAttribute("ChimeEnergy") or 0) <= 0 then
 		send(player, "toast", { text = "⚡ No energy to shut the door." })
 		return
 	end
-	setDoor(side, closing)
+	if entry == 0 then
+		setDoor(side, closing)
+	else
+		setSideDoor(side, entry, closing)
+	end
 end
 
 ---------------------------------------------------------------- requests
@@ -874,7 +996,7 @@ event.OnServerEvent:Connect(function(player: Player, action: any, data: any)
 				send(player, "toast", { text = "🔋 +40 energy" })
 			end
 		elseif action == "door" then
-			onDoorClicked(player, side)
+			onDoorClicked(player, side, if type(data.which) == "string" then data.which else nil)
 		elseif action == "flash" then
 			local on = data.on == true
 			if on and ((player:GetAttribute("ChimeEnergy") or 0) <= 0 or player:GetAttribute("ChimeMask")) then

@@ -227,7 +227,7 @@ function ChimeApp:_buildLobby(page: Frame)
 		"You're locked in rooms at opposite ends of the Looping Rooms.",
 		"Play Snake & Minesweeper for coins (they vanish after the match).",
 		"Spend coins on robots that hunt your opponent, or on items.",
-		"🟡 Glare: flashlight (F)   🔴 Brute: shut your door (E)   🟣 Hollow: mask (Q)",
+		"🟡 Glare: flashlight (F)   🔴 Brute: shut its door (E / Z / C)   🟣 Hollow: mask (Q)",
 		"Door & flashlight use energy. Caught without a Death Token = you lose.",
 	}
 	for i, t in ipairs(lines) do

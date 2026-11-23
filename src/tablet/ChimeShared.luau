@@ -36,7 +36,7 @@ ChimeShared.ROBOTS = {
 		speed = 14,
 		interval = 4,
 		chance = 0.65,
-		counter = "Pushes through open doors. Shut your door (E or the door button) until it gives up.",
+		counter = "Pushes through open doors. Shut the door it comes to (E front, Z / C sides) until it gives up.",
 	},
 	{
 		id = "hollow",
@@ -147,7 +147,10 @@ ChimeShared.INSIDE = 7 -- route index inside the room
 ---------------------------------------------------------------- robot spots
 -- Owner A's robots wait in the north alcove, owner B's in the south one.
 -- Stages: 1 home, 2 central hall, 3 near corridor, 4 far corridor,
--- 5 hall outside the room, 6 at the door, 7 inside the room.
+-- 5 outside the room, 6 at a door, 7 inside the room.
+-- Each room has three ways in (`entry`): 0 = the front doorway, or +1 / -1 =
+-- the side door into the closet at plan y > 0 / y < 0 (reached by the
+-- corridor that loops round the closet block).
 ChimeShared.STAGE_DOOR = 6
 ChimeShared.STAGE_INSIDE = 7
 ChimeShared.STAGES = 7
@@ -158,10 +161,11 @@ local function lane(owner: string): number
 	return if owner == "A" then 1 else -1
 end
 
-local function planPoint(owner: string, kind: string, victim: string, stage: number): (number, number)
+local function planPoint(owner: string, kind: string, victim: string, stage: number, entry: number?): (number, number)
 	local L = lane(owner)
 	local d = ChimeShared.sign(victim)
 	local k = KIND_SLOT[kind] or 0
+	local e = entry or 0
 	if stage <= 1 then
 		return k * 1.2, (8.9 - math.abs(k) * 0.5) * L
 	elseif stage == 2 then
@@ -170,6 +174,15 @@ local function planPoint(owner: string, kind: string, victim: string, stage: num
 		return d * 9, (4.5 + k * 0.6) * L
 	elseif stage == 4 then
 		return d * 16.5, (4.5 + k * 0.6) * L
+	elseif e ~= 0 then
+		-- round the closet block and in by a side door
+		if stage == 5 then
+			return d * (24.5 + k * 0.9), 8.2 * e
+		elseif stage == 6 then
+			return d * (31.5 + k * 0.5), (4.6 + k * 0.3) * e
+		else
+			return d * (30.9 + k * 0.6), 1.3 * e
+		end
 	elseif stage == 5 then
 		return d * 19.9, (1.2 + k * 0.6) * L
 	elseif stage == 6 then
@@ -180,19 +193,28 @@ local function planPoint(owner: string, kind: string, victim: string, stage: num
 end
 
 -- where a robot stands at a stage (feet + 3 studs, like a character's root)
-function ChimeShared.robotSpot(owner: string, kind: string, victim: string, stage: number): CFrame
-	local x, y = planPoint(owner, kind, victim, stage)
+function ChimeShared.robotSpot(owner: string, kind: string, victim: string, stage: number, entry: number?): CFrame
+	local x, y = planPoint(owner, kind, victim, stage, entry)
 	local p = ChimeShared.at(x, y, 0) + Vector3.new(0, 3, 0)
 	local tx, ty
 	if stage <= 1 then
 		tx, ty = 0, 0
 	elseif stage >= ChimeShared.STAGES then
-		tx, ty = ChimeShared.sign(victim) * 33, 0
+		tx, ty = ChimeShared.sign(victim) * 31, 0
+	elseif stage == ChimeShared.STAGE_DOOR and (entry or 0) ~= 0 then
+		tx, ty = x, 0 -- facing the side door
 	else
-		tx, ty = planPoint(owner, kind, victim, stage + 1)
+		tx, ty = planPoint(owner, kind, victim, stage + 1, entry)
 	end
 	local t = ChimeShared.at(tx, ty, 0)
 	return CFrame.lookAt(p, Vector3.new(t.X, p.Y, t.Z))
+end
+
+-- which closet side (plan y sign) a player's left / right door is on
+-- (players face the front doorway, toward the middle of the map)
+function ChimeShared.sideEntry(side: string, which: string): number
+	local d = ChimeShared.sign(side)
+	return if which == "left" then -d else d
 end
 
 -- security cameras: name, where it hangs, what it looks at (plan metres)

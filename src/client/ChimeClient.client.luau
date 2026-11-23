@@ -2,7 +2,8 @@
 --   * a bar at the top with energy, coins, Death Tokens, mask and light
 --   * F: flashlight (sends Glare away when it's in the beam)
 --   * Q: mask (Hollow leaves you alone while it's on; no tablet while worn)
---   * your door: E (or the button in your room) shuts / opens it
+--   * your doors: E the front one (or the button in your room), Z / C the
+--     left / right side doors (or click them)
 --   * security cameras (opened from the tablet app)
 --   * the jumpscare when a robot gets you, messages, and the result
 
@@ -93,13 +94,21 @@ local energyFill = new("Frame", {
 local energyText = text({ Size = UDim2.fromScale(1, 1), TextColor3 = Color3.fromRGB(10, 20, 30), TextStrokeTransparency = 1, Text = "", Parent = energyBack })
 local statusText = text({ Position = UDim2.fromOffset(226, 30), Size = UDim2.fromOffset(326, 26), TextXAlignment = Enum.TextXAlignment.Right, Text = "", Parent = bar })
 local coinsText = text({ Position = UDim2.fromOffset(270, 6), Size = UDim2.fromOffset(282, 22), TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = Color3.fromRGB(255, 205, 90), Text = "", Parent = bar })
+local doorsText = text({
+	AnchorPoint = Vector2.new(0.5, 0),
+	Position = UDim2.new(0.5, 0, 0, 124),
+	Size = UDim2.fromOffset(560, 22),
+	Text = "",
+	Visible = false,
+	Parent = gui,
+})
 local hint = text({
 	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0, 126),
+	Position = UDim2.new(0.5, 0, 0, 150),
 	Size = UDim2.fromOffset(560, 18),
 	TextColor3 = Color3.fromRGB(210, 200, 215),
 	FontFace = Font.new("rbxasset://fonts/families/GothamSSm.json"),
-	Text = "F flashlight · Q mask · E door · M tablet (Snake & Minesweeper = coins)",
+	Text = "F flashlight · Q mask · E / Z / C doors · M tablet (Snake & Minesweeper = coins)",
 	Visible = false,
 	Parent = gui,
 })
@@ -115,6 +124,7 @@ local function refreshBar()
 	local on = inMatch() and not player:GetAttribute("TabletOpen") and not camsOpen
 	bar.Visible = on
 	hint.Visible = on
+	doorsText.Visible = on
 	if not on then
 		return
 	end
@@ -125,13 +135,21 @@ local function refreshBar()
 	energyText.Text = string.format("⚡ %d", math.floor(energy + 0.5))
 	coinsText.Text = string.format("💰 %d   💀 %d", player:GetAttribute("ChimeCoins") or 0, player:GetAttribute("ChimeTokens") or 0)
 	statusText.Text = string.format(
-		"🎭 %s   🔦 %s   🚪 %s",
+		"🎭 %s   🔦 %s",
 		if player:GetAttribute("ChimeMask") then "ON" else "off",
-		if player:GetAttribute("ChimeFlash") then "ON" else "off",
-		if player:GetAttribute("ChimeDoor") then "SHUT" else "open"
+		if player:GetAttribute("ChimeFlash") then "ON" else "off"
+	)
+	local function door(name: string): string
+		return if player:GetAttribute(name) then "SHUT" else "open"
+	end
+	doorsText.Text = string.format(
+		"🚪 [Z] Left: %s    [E] Front: %s    [C] Right: %s",
+		door("ChimeDoorL"),
+		door("ChimeDoor"),
+		door("ChimeDoorR")
 	)
 end
-for _, name in ipairs({ "ChimeMatch", "ChimeEnergy", "ChimeCoins", "ChimeTokens", "ChimeMask", "ChimeFlash", "ChimeDoor", "ChimeOpponent", "TabletOpen" }) do
+for _, name in ipairs({ "ChimeMatch", "ChimeEnergy", "ChimeCoins", "ChimeTokens", "ChimeMask", "ChimeFlash", "ChimeDoor", "ChimeDoorL", "ChimeDoorR", "ChimeOpponent", "TabletOpen" }) do
 	player:GetAttributeChangedSignal(name):Connect(refreshBar)
 end
 refreshBar()
@@ -434,6 +452,10 @@ UserInputService.InputBegan:Connect(function(input, processed)
 		event:FireServer("flash", { on = not player:GetAttribute("ChimeFlash") })
 	elseif input.KeyCode == Enum.KeyCode.E then
 		event:FireServer("door")
+	elseif input.KeyCode == Enum.KeyCode.Z then
+		event:FireServer("door", { which = "left" })
+	elseif input.KeyCode == Enum.KeyCode.C then
+		event:FireServer("door", { which = "right" })
 	elseif input.KeyCode == Enum.KeyCode.Q then
 		closeCams()
 		event:FireServer("mask", { on = not player:GetAttribute("ChimeMask") })
