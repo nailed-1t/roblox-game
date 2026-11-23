@@ -345,19 +345,98 @@ local rec = text({
 	ZIndex = 6,
 	Parent = camGui,
 })
+-- the camera picker is a little map of the Looping Rooms (drawn from the
+-- map's own walls), with each camera's button where that camera is, FNAF style
+local MAP_W, MAP_H = 440, 136 -- pixels for the whole map
+local PLAN_HALF_X, PLAN_HALF_Y = 34.6, 10.6 -- the map's half size in plan metres
 local camList = new("Frame", {
+	Name = "Map",
 	AnchorPoint = Vector2.new(1, 1),
 	Position = UDim2.new(1, -24, 1, -24),
-	Size = UDim2.fromOffset(330, 162),
+	Size = UDim2.fromOffset(MAP_W + 20, MAP_H + 20),
 	BackgroundColor3 = Color3.fromRGB(10, 14, 12),
-	BackgroundTransparency = 0.25,
+	BackgroundTransparency = 0.2,
 	ZIndex = 6,
 	Parent = camGui,
 }, {
 	new("UICorner", { CornerRadius = UDim.new(0, 10) }),
-	new("UIGridLayout", { CellSize = UDim2.fromOffset(100, 40), CellPadding = UDim2.fromOffset(8, 8), SortOrder = Enum.SortOrder.LayoutOrder }),
-	new("UIPadding", { PaddingTop = UDim.new(0, 10), PaddingLeft = UDim.new(0, 10) }),
 })
+local mapArea = new("Frame", {
+	Name = "Area",
+	Position = UDim2.fromOffset(10, 10),
+	Size = UDim2.fromOffset(MAP_W, MAP_H),
+	BackgroundTransparency = 1,
+	ZIndex = 6,
+	Parent = camList,
+})
+
+-- plan metres -> pixels on the little map. Your own room is always on the
+-- left (the map is turned round for side B).
+local function mapFlip(): number
+	return if player:GetAttribute("ChimeSide") == "B" then -1 else 1
+end
+local function toMap(x: number, y: number): (number, number)
+	local f = mapFlip()
+	local u = (f * x + PLAN_HALF_X) / (2 * PLAN_HALF_X) * MAP_W
+	local v = (-f * y + PLAN_HALF_Y) / (2 * PLAN_HALF_Y) * MAP_H
+	return u, v
+end
+
+local mapDrawnFor = nil -- which side the walls were drawn for
+local function drawMapWalls()
+	local side = player:GetAttribute("ChimeSide") or "A"
+	if mapDrawnFor == side then
+		return
+	end
+	local map = ChimeShared.map()
+	local main = map and map:FindFirstChild("Plane.004") :: BasePart?
+	local walls = map and map:FindFirstChild("Collision")
+	if not main or not walls then
+		return
+	end
+	mapDrawnFor = side
+	for _, old in ipairs(mapArea:GetChildren()) do
+		if old.Name == "Wall" then
+			old:Destroy()
+		end
+	end
+	local c, s = main.Position, ChimeShared.scale()
+	for _, w in ipairs(walls:GetChildren()) do
+		if w.Name == "Wall" and w:IsA("BasePart") then
+			-- the wall's footprint, in plan metres
+			local half = (w.CFrame.RightVector * w.Size.X / 2):Abs() + (w.CFrame.LookVector * w.Size.Z / 2):Abs()
+			local x1, x2 = -(w.Position.X + half.X - c.X) / s, -(w.Position.X - half.X - c.X) / s
+			local y1, y2 = (w.Position.Z - half.Z - c.Z) / s, (w.Position.Z + half.Z - c.Z) / s
+			local u1, v1 = toMap(x1, y1)
+			local u2, v2 = toMap(x2, y2)
+			local left, top = math.min(u1, u2), math.min(v1, v2)
+			new("Frame", {
+				Name = "Wall",
+				Position = UDim2.fromOffset(math.floor(left), math.floor(top)),
+				Size = UDim2.fromOffset(math.max(2, math.abs(u2 - u1)), math.max(2, math.abs(v2 - v1))),
+				BorderSizePixel = 0,
+				BackgroundColor3 = Color3.fromRGB(150, 160, 150),
+				ZIndex = 7,
+				Parent = mapArea,
+			})
+		end
+	end
+end
+
+-- "YOU" in your room
+local youDot = new("TextLabel", {
+	Name = "You",
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Size = UDim2.fromOffset(34, 16),
+	Text = "YOU",
+	FontFace = FONT,
+	TextScaled = true,
+	TextColor3 = Color3.new(1, 1, 1),
+	BackgroundColor3 = Color3.fromRGB(200, 60, 60),
+	ZIndex = 9,
+	Parent = mapArea,
+}, { new("UICorner", { CornerRadius = UDim.new(0, 4) }) })
+
 local camButtons = {}
 local function showCam(i: number)
 	camIndex = i
@@ -368,31 +447,49 @@ local function showCam(i: number)
 	camera.FieldOfView = 80
 	camName.Text = cam.name
 	for j, b in ipairs(camButtons) do
-		b.BackgroundColor3 = if j == i then Color3.fromRGB(60, 140, 90) else Color3.fromRGB(40, 50, 44)
+		b.BackgroundColor3 = if j == i then Color3.fromRGB(60, 170, 100) else Color3.fromRGB(40, 56, 46)
 	end
 end
 for i, cam in ipairs(ChimeShared.CAMERAS) do
 	local b = new("TextButton", {
 		Name = "Cam" .. i,
-		LayoutOrder = i,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Size = UDim2.fromOffset(46, 20),
 		Text = "CAM " .. i,
 		FontFace = FONT,
 		TextScaled = true,
 		TextColor3 = Color3.new(1, 1, 1),
-		BackgroundColor3 = Color3.fromRGB(40, 50, 44),
-		ZIndex = 7,
-		Parent = camList,
-	}, { new("UICorner", { CornerRadius = UDim.new(0, 6) }), new("UIPadding", { PaddingTop = UDim.new(0.25, 0), PaddingBottom = UDim.new(0.25, 0) }) })
+		BackgroundColor3 = Color3.fromRGB(40, 56, 46),
+		ZIndex = 10,
+		Parent = mapArea,
+	}, {
+		new("UICorner", { CornerRadius = UDim.new(0, 4) }),
+		new("UIStroke", { Color = Color3.fromRGB(10, 14, 12), Thickness = 1.5, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }),
+		new("UIPadding", { PaddingTop = UDim.new(0.15, 0), PaddingBottom = UDim.new(0.15, 0) }),
+	})
 	b.Activated:Connect(function()
 		showCam(i)
 	end)
 	camButtons[i] = b
 end
+
+-- put everything where it belongs for the side you're on
+local function layoutMap()
+	drawMapWalls()
+	for i, cam in ipairs(ChimeShared.CAMERAS) do
+		-- halfway between the camera and what it looks at
+		local u, v = toMap((cam.from[1] + cam.to[1]) / 2, (cam.from[2] + cam.to[2]) / 2)
+		camButtons[i].Position = UDim2.fromOffset(u, v)
+	end
+	local side = player:GetAttribute("ChimeSide") or "A"
+	local u, v = toMap(ChimeShared.sign(side) * 32.3, 0)
+	youDot.Position = UDim2.fromOffset(u, v)
+end
 local exitCams = new("TextButton", {
 	Name = "Exit",
 	AnchorPoint = Vector2.new(1, 1),
-	Position = UDim2.new(1, -24, 1, -194),
-	Size = UDim2.fromOffset(330, 40),
+	Position = UDim2.new(1, -24, 1, -190),
+	Size = UDim2.fromOffset(MAP_W + 20, 36),
 	Text = "X  Close cameras",
 	Modal = true, -- frees the mouse (even in first person) while the cameras are up
 	FontFace = FONT,
@@ -425,6 +522,7 @@ local function openCams()
 	end
 	camsOpen = true
 	player:SetAttribute("ChimeCams", true) -- lets the crosshair script show the cursor
+	layoutMap()
 	camGui.Visible = true
 	camera.CameraType = Enum.CameraType.Scriptable
 	showCam(camIndex)
