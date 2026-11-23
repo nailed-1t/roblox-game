@@ -208,7 +208,7 @@ do
 			local d = Shared.sign(side)
 			-- hinge on the edge by the back wall, swinging out into the closet
 			local hinge = CFrame.new(body.Position + Vector3.new(-d * body.Size.X / 2, 0, 0))
-			local swing = hinge * CFrame.Angles(0, math.rad(95) * d * entry, 0) * hinge:Inverse()
+			local swing = hinge * CFrame.Angles(0, -math.rad(95) * d * entry, 0) * hinge:Inverse()
 			local parts = {}
 			for _, part in ipairs(model:GetDescendants()) do
 				if part:IsA("BasePart") then
