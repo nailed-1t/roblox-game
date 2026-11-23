@@ -182,7 +182,7 @@ refreshBar()
 
 local toastLabel = text({
 	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0, 150),
+	Position = UDim2.new(0.5, 0, 0, 178),
 	Size = UDim2.fromOffset(640, 30),
 	BackgroundColor3 = Color3.fromRGB(20, 12, 20),
 	BackgroundTransparency = 0.2,
@@ -394,6 +394,7 @@ local exitCams = new("TextButton", {
 	Position = UDim2.new(1, -24, 1, -194),
 	Size = UDim2.fromOffset(330, 40),
 	Text = "X  Close cameras",
+	Modal = true, -- frees the mouse (even in first person) while the cameras are up
 	FontFace = FONT,
 	TextScaled = true,
 	TextColor3 = Color3.new(1, 1, 1),
