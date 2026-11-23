@@ -35,7 +35,6 @@ local GLARE_LIGHT_NEEDED = 1 -- seconds of flashlight that send Glare away
 local BRUTE_BANG_SECONDS = 6 -- how long Brute bangs on a shut door
 local BRUTE_DRAIN = 4 -- energy per second Brute's banging costs you
 local HOLLOW_WAIT = 3 -- seconds Hollow stares at you before deciding
-local WALK_ANIM = "rbxassetid://180426354" -- the standard R6 walk
 
 local robotInfo = {}
 for _, r in ipairs(Shared.ROBOTS) do
@@ -144,6 +143,13 @@ for _, side in ipairs({ "A", "B" }) do
 end
 
 ---------------------------------------------------------------- robots
+-- Every player side owns one robot of each kind. They stand in their alcove
+-- (workspace.ChimeMap.Robots) and, once woken with coins, creep toward the
+-- other room FNAF-style: frozen in place, jumping one camera spot at a time.
+
+local robotsFolder = map:FindFirstChild("Robots") or Instance.new("Folder")
+robotsFolder.Name = "Robots"
+robotsFolder.Parent = map
 
 local function makeRobotModel(kind: string): Model
 	local info = robotInfo[kind]
@@ -186,112 +192,149 @@ local function makeRobotModel(kind: string): Model
 		end
 	end
 	model.Name = info.name
-	local humanoid = model:FindFirstChildOfClass("Humanoid") :: Humanoid
-	humanoid.WalkSpeed = info.speed
-	humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
-	humanoid.BreakJointsOnDeath = false
-	humanoid:SetStateEnabled(Enum.HumanoidStateType.Dead, false)
-	for _, d in ipairs(model:GetDescendants()) do
-		if d:IsA("BasePart") then
-			d.CollisionGroup = "ChimeRobots"
-			d.CanTouch = false
-		elseif d:IsA("Script") or d:IsA("LocalScript") then
-			d:Destroy()
-		end
-	end
-	-- a name tag (handy on the cameras)
-	local root = model:FindFirstChild("HumanoidRootPart") :: BasePart
-	local tag = Instance.new("BillboardGui")
-	tag.Size = UDim2.fromOffset(120, 24)
-	tag.StudsOffset = Vector3.new(0, 3.4, 0)
-	tag.MaxDistance = 140
-	tag.LightInfluence = 0
-	local text = Instance.new("TextLabel")
-	text.BackgroundTransparency = 1
-	text.Size = UDim2.fromScale(1, 1)
-	text.Text = string.upper(info.name)
-	text.TextColor3 = info.color
-	text.TextStrokeTransparency = 0.3
-	text.Font = Enum.Font.GothamBlack
-	text.TextScaled = true
-	text.Parent = tag
-	tag.Parent = root
-	-- its sound tells you it is coming (louder as it gets closer)
-	local sound = Instance.new("Sound")
-	sound.Name = "Presence"
-	sound.SoundId = Shared.SOUNDS[kind]
-	sound.Looped = true
-	sound.Volume = 1.6
-	sound.RollOffMode = Enum.RollOffMode.InverseTapered
-	sound.RollOffMinDistance = 8
-	sound.RollOffMaxDistance = 110
-	sound.Parent = root
 	model:SetAttribute("ChimeRobot", kind)
 	return model
 end
 
+-- set up a robot model as a frozen animatronic (anchored, no collisions)
+local function prepareRobot(model: Model, kind: string, owner: string)
+	local info = robotInfo[kind]
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+		humanoid.BreakJointsOnDeath = false
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.Dead, false)
+		humanoid.PlatformStand = true
+	end
+	for _, d in ipairs(model:GetDescendants()) do
+		if d:IsA("BasePart") then
+			d.Anchored = true
+			d.CanCollide = false
+			d.CanTouch = false
+			d.CollisionGroup = "ChimeRobots"
+		elseif d:IsA("Script") or d:IsA("LocalScript") then
+			d:Destroy()
+		end
+	end
+	local root = (model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart) :: BasePart
+	if not model.PrimaryPart then
+		model.PrimaryPart = root
+	end
+	-- a name tag (handy on the cameras)
+	if not root:FindFirstChild("NameTag") then
+		local tag = Instance.new("BillboardGui")
+		tag.Name = "NameTag"
+		tag.Size = UDim2.fromOffset(120, 24)
+		tag.StudsOffset = Vector3.new(0, 3.4, 0)
+		tag.MaxDistance = 140
+		tag.LightInfluence = 0
+		local text = Instance.new("TextLabel")
+		text.BackgroundTransparency = 1
+		text.Size = UDim2.fromScale(1, 1)
+		text.Text = string.upper(info.name)
+		text.TextColor3 = info.color
+		text.TextStrokeTransparency = 0.3
+		text.Font = Enum.Font.GothamBlack
+		text.TextScaled = true
+		text.Parent = tag
+		tag.Parent = root
+	end
+	-- its sound tells you it is coming (louder as it gets closer)
+	local sound = root:FindFirstChild("Presence") :: Sound?
+	if not sound then
+		local s = Instance.new("Sound")
+		s.Name = "Presence"
+		s.Looped = true
+		s.Volume = 1.6
+		s.RollOffMode = Enum.RollOffMode.InverseTapered
+		s.RollOffMinDistance = 8
+		s.RollOffMaxDistance = 110
+		s.Parent = root
+		sound = s
+	end
+	local presence = sound :: Sound
+	presence.SoundId = Shared.SOUNDS[kind]
+	model:SetAttribute("ChimeRobot", kind)
+	model:SetAttribute("ChimeOwner", owner)
+	model.Name = info.name .. " (" .. owner .. ")"
+end
+
 local nextRobotId = 0
+local robots = {} -- [owner side][kind] = robot record
+
+local function homeOf(r): CFrame
+	return Shared.robotSpot(r.owner, r.kind, if r.owner == "A" then "B" else "A", 1)
+end
+
+local function setStage(r, stage: number)
+	r.stage = stage
+	local victim = if r.owner == "A" then "B" else "A"
+	r.model:PivotTo(Shared.robotSpot(r.owner, r.kind, victim, stage))
+	r.model:SetAttribute("ChimeStage", stage)
+end
+
+for _, owner in ipairs({ "A", "B" }) do
+	robots[owner] = {}
+	for _, info in ipairs(Shared.ROBOTS) do
+		local name = info.name .. " (" .. owner .. ")"
+		local model = robotsFolder:FindFirstChild(name) :: any
+		local folder = ServerStorage:FindFirstChild("ChimeRobots")
+		if model and folder and folder:FindFirstChild(info.id) then
+			model:Destroy() -- the real model has arrived: swap it in
+			model = nil
+		end
+		if not model then
+			model = makeRobotModel(info.id)
+		end
+		prepareRobot(model, info.id, owner)
+		nextRobotId += 1
+		local r = {
+			id = nextRobotId,
+			kind = info.id,
+			owner = owner,
+			model = model,
+			root = model.PrimaryPart,
+			active = false,
+			stage = 1,
+			light = 0,
+		}
+		robots[owner][info.id] = r
+		setStage(r, 1)
+		model.Parent = robotsFolder
+	end
+end
 
 local function robotAlive(r): boolean
-	return not r.gone and match ~= nil and match == r.match and not r.match.over
+	return r.active and match ~= nil and match == r.match and not r.match.over
 end
 
--- walk through the points in order; stops early if `stop()` says so
-local function walkTo(r, points: { Vector3 }, stop: (() -> boolean)?): boolean
-	local humanoid = r.humanoid
-	for _, p in ipairs(points) do
-		if not robotAlive(r) or (stop and stop()) then
-			return false
-		end
-		local reached = false
-		local conn = humanoid.MoveToFinished:Connect(function()
-			reached = true
-		end)
-		humanoid:MoveTo(p)
-		local limit = os.clock() + (r.root.Position - p).Magnitude / humanoid.WalkSpeed + 3
-		while not reached and os.clock() < limit do
-			task.wait(0.1)
-			if not robotAlive(r) or (stop and stop()) then
-				conn:Disconnect()
-				humanoid:MoveTo(r.root.Position)
-				return false
-			end
-		end
-		conn:Disconnect()
-		if not reached then
-			-- stuck on something: hop to the point
-			r.model:PivotTo(CFrame.new(p) * r.root.CFrame.Rotation)
-		end
-	end
-	return true
-end
-
+-- back to its alcove, asleep again
 local function removeRobot(r)
-	if r.gone then
+	if not r.active then
 		return
 	end
-	r.gone = true
+	r.active = false
 	if r.match then
 		r.match.robots[r.id] = nil
 	end
-	if r.model then
-		r.model:Destroy()
+	r.match = nil
+	r.victim = nil
+	local sound = r.root:FindFirstChild("Presence") :: Sound?
+	if sound then
+		sound:Stop()
 	end
+	r.model:SetAttribute("ChimeVictim", nil)
+	r.model:SetAttribute("ChimeRobotId", nil)
+	r.model:SetAttribute("ChimeState", nil)
+	setStage(r, 1)
 end
 
--- back to where it came from, then away
 local function retreat(r)
-	if r.gone then
+	if not r.active then
 		return
 	end
-	r.state = "leaving"
 	r.model:SetAttribute("ChimeState", "leaving")
-	r.humanoid.WalkSpeed = robotInfo[r.kind].speed * 1.4
-	local back = {}
-	for i = #r.route - 1, 1, -1 do
-		table.insert(back, r.route[i])
-	end
-	walkTo(r, back)
+	task.wait(0.6)
 	removeRobot(r)
 end
 
@@ -317,7 +360,7 @@ local function catch(r)
 	local victim = r.victim
 	local character = victim.Character
 	local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
-	r.state = "catching"
+	r.model:SetAttribute("ChimeState", "catching")
 	if root then
 		local look = Vector3.new(root.Position.X, r.root.Position.Y, root.Position.Z)
 		r.model:PivotTo(CFrame.lookAt(r.root.Position, look))
@@ -332,11 +375,11 @@ local function catch(r)
 	if tokens > 0 then
 		victim:SetAttribute("ChimeTokens", tokens - 1)
 		send(victim, "toast", { text = "💀 Your Death Token saved you from " .. robotInfo[r.kind].name .. "!" })
-		local sender = r.match.players[r.senderSide]
+		local sender = r.match.players[r.owner]
 		if sender then
 			send(sender, "toast", { text = nameOf(victim) .. " used a Death Token against your " .. robotInfo[r.kind].name })
 		end
-		retreat(r)
+		removeRobot(r)
 		return
 	end
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
@@ -347,38 +390,29 @@ local function catch(r)
 	removeRobot(r)
 end
 
-local function runRobot(r)
-	local route = r.route
-	r.model:PivotTo(CFrame.lookAt(route[1], route[2]))
-	r.model.Parent = matchFolder
-	r.root:SetNetworkOwner(nil)
-	local animator = r.humanoid:FindFirstChildOfClass("Animator")
-	if not animator then
-		animator = Instance.new("Animator")
-		animator.Parent = r.humanoid
-	end
-	local anim = Instance.new("Animation")
-	anim.AnimationId = WALK_ANIM
-	local walkTrack = animator:LoadAnimation(anim)
-	walkTrack.Looped = true
-	r.humanoid.Running:Connect(function(speed)
-		if speed > 0.5 then
-			if not walkTrack.IsPlaying then
-				walkTrack:Play()
+-- wait for movement opportunities until one succeeds (FNAF style)
+local function waitForMove(r, stop: (() -> boolean)?): boolean
+	local info = robotInfo[r.kind]
+	while true do
+		local untilTime = os.clock() + info.interval
+		while os.clock() < untilTime do
+			task.wait(0.1)
+			if not robotAlive(r) or (stop and stop()) then
+				return false
 			end
-		elseif walkTrack.IsPlaying then
-			walkTrack:Stop()
 		end
-	end)
-	r.root:FindFirstChild("Presence"):Play()
-	r.state = "coming"
-	r.model:SetAttribute("ChimeState", "coming")
-
-	local victimSide = r.victimSide
-	local toDoor = {}
-	for i = 2, Shared.DOOR_STOP do
-		table.insert(toDoor, route[i])
+		if math.random() < info.chance then
+			return true
+		end
 	end
+end
+
+local function runRobot(r)
+	r.light = 0
+	r.root:FindFirstChild("Presence"):Play()
+	r.model:SetAttribute("ChimeState", "coming")
+	local victimSide = if r.owner == "A" then "B" else "A"
+
 	local function flashedAway(): boolean
 		return r.kind == "glare" and r.light >= GLARE_LIGHT_NEEDED
 	end
@@ -388,18 +422,19 @@ local function runRobot(r)
 		retreat(r)
 	end
 
-	walkTo(r, toDoor, flashedAway)
-	if not robotAlive(r) then
-		return
-	end
-	if flashedAway() then
-		repel()
-		return
+	-- creep up to the door, one spot at a time
+	while r.stage < Shared.STAGE_DOOR do
+		if not waitForMove(r, flashedAway) then
+			if robotAlive(r) and flashedAway() then
+				repel()
+			end
+			return
+		end
+		setStage(r, r.stage + 1)
 	end
 
 	if r.kind == "brute" and doors[victimSide].closed then
 		-- bang on the door until it gives up (or the door opens)
-		r.state = "banging"
 		r.model:SetAttribute("ChimeState", "banging")
 		local untilTime = os.clock() + BRUTE_BANG_SECONDS
 		local door = doors[victimSide]
@@ -423,18 +458,24 @@ local function runRobot(r)
 			return
 		end
 		-- the door gave way: straight in
+		setStage(r, Shared.STAGE_INSIDE)
+	else
+		-- one more opportunity and it's in the room
+		if not waitForMove(r, flashedAway) then
+			if robotAlive(r) and flashedAway() then
+				repel()
+			end
+			return
+		end
+		if r.kind == "brute" and doors[victimSide].closed then
+			-- shut in its face at the last moment
+			send(r.victim, "toast", { text = "🚪 Brute gave up on your door." })
+			retreat(r)
+			return
+		end
+		setStage(r, Shared.STAGE_INSIDE)
 	end
-
-	r.state = "inside"
 	r.model:SetAttribute("ChimeState", "inside")
-	walkTo(r, { route[Shared.INSIDE] }, flashedAway)
-	if not robotAlive(r) then
-		return
-	end
-	if flashedAway() then
-		repel()
-		return
-	end
 
 	if r.kind == "glare" then
 		local untilTime = os.clock() + GLARE_WINDOW
@@ -462,26 +503,18 @@ local function runRobot(r)
 	end
 end
 
-local function summon(m, senderSide: string, kind: string)
+local function summon(m, senderSide: string, kind: string): boolean
+	local r = robots[senderSide][kind]
+	if r.active then
+		return false
+	end
 	local victimSide = if senderSide == "A" then "B" else "A"
-	nextRobotId += 1
-	local model = makeRobotModel(kind)
-	local r = {
-		id = nextRobotId,
-		kind = kind,
-		match = m,
-		senderSide = senderSide,
-		victimSide = victimSide,
-		victim = m.players[victimSide],
-		model = model,
-		humanoid = model:FindFirstChildOfClass("Humanoid"),
-		root = model:FindFirstChild("HumanoidRootPart"),
-		route = Shared.route(victimSide, if math.random() < 0.5 then 1 else -1),
-		light = 0,
-		gone = false,
-	}
-	model:SetAttribute("ChimeRobotId", r.id)
-	model:SetAttribute("ChimeVictim", r.victim.UserId)
+	r.active = true
+	r.match = m
+	r.victim = m.players[victimSide]
+	setStage(r, 1)
+	r.model:SetAttribute("ChimeRobotId", r.id)
+	r.model:SetAttribute("ChimeVictim", r.victim.UserId)
 	m.robots[r.id] = r
 	task.spawn(function()
 		local ok, err = pcall(runRobot, r)
@@ -490,6 +523,7 @@ local function summon(m, senderSide: string, kind: string)
 			removeRobot(r)
 		end
 	end)
+	return true
 end
 
 ---------------------------------------------------------------- matches
@@ -750,11 +784,9 @@ event.OnServerEvent:Connect(function(player: Player, action: any, data: any)
 				return
 			end
 			if robot then
-				for _, r in pairs(m.robots) do
-					if r.senderSide == side and r.kind == id then
-						send(player, "toast", { text = robot.name .. " is already out hunting." })
-						return
-					end
+				if robots[side][id].active then
+					send(player, "toast", { text = robot.name .. " is already out hunting." })
+					return
 				end
 				player:SetAttribute("ChimeCoins", coins - price)
 				summon(m, side, id)

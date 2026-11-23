@@ -13,7 +13,9 @@ ChimeShared.DOOR_DRAIN = 1.2 -- energy per second while your door is shut
 ChimeShared.FLASH_DRAIN = 2 -- energy per second while your flashlight is on
 ChimeShared.MATCH_SECONDS = 8 * 60 -- a draw if nobody has been caught by then
 
--- Robots, summoned with coins; each one hunts your opponent.
+-- Robots: each player owns one of each, waiting in their alcove. Spend coins
+-- to wake one; it then creeps toward your opponent's room FNAF-style: every
+-- `interval` seconds it has a `chance` to jump to the next camera spot.
 -- Colours are placeholders until the real models arrive (ServerStorage.ChimeRobots.<id>).
 ChimeShared.ROBOTS = {
 	{
@@ -22,6 +24,8 @@ ChimeShared.ROBOTS = {
 		price = 15,
 		color = Color3.fromRGB(255, 214, 64),
 		speed = 11,
+		interval = 5,
+		chance = 0.7,
 		counter = "Shine your flashlight (F) on it to send it away. Doors don't stop it.",
 	},
 	{
@@ -30,6 +34,8 @@ ChimeShared.ROBOTS = {
 		price = 20,
 		color = Color3.fromRGB(200, 50, 50),
 		speed = 14,
+		interval = 4,
+		chance = 0.65,
 		counter = "Pushes through open doors. Shut your door (click it) until it gives up.",
 	},
 	{
@@ -38,6 +44,8 @@ ChimeShared.ROBOTS = {
 		price = 25,
 		color = Color3.fromRGB(120, 70, 190),
 		speed = 9,
+		interval = 6,
+		chance = 0.6,
 		counter = "Walks into your room. Put your mask on (Q) before it reaches you.",
 	},
 }
@@ -135,6 +143,57 @@ function ChimeShared.route(side: string, lane: number): { Vector3 }
 end
 ChimeShared.DOOR_STOP = 6 -- route index just outside the door
 ChimeShared.INSIDE = 7 -- route index inside the room
+
+---------------------------------------------------------------- robot spots
+-- Owner A's robots wait in the north alcove, owner B's in the south one.
+-- Stages: 1 home, 2 central hall, 3 near corridor, 4 far corridor,
+-- 5 hall outside the room, 6 at the door, 7 inside the room.
+ChimeShared.STAGE_DOOR = 6
+ChimeShared.STAGE_INSIDE = 7
+ChimeShared.STAGES = 7
+
+local KIND_SLOT = { glare = -1, brute = 0, hollow = 1 }
+
+local function lane(owner: string): number
+	return if owner == "A" then 1 else -1
+end
+
+local function planPoint(owner: string, kind: string, victim: string, stage: number): (number, number)
+	local L = lane(owner)
+	local d = ChimeShared.sign(victim)
+	local k = KIND_SLOT[kind] or 0
+	if stage <= 1 then
+		return k * 1.2, (8.9 - math.abs(k) * 0.5) * L
+	elseif stage == 2 then
+		return k * 1.1, 2.5 * L
+	elseif stage == 3 then
+		return d * 9, (4.5 + k * 0.6) * L
+	elseif stage == 4 then
+		return d * 16.5, (4.5 + k * 0.6) * L
+	elseif stage == 5 then
+		return d * 19.9, (1.2 + k * 0.6) * L
+	elseif stage == 6 then
+		return d * 25.2, k * 0.9
+	else
+		return d * 29.4, k * 0.9
+	end
+end
+
+-- where a robot stands at a stage (feet + 3 studs, like a character's root)
+function ChimeShared.robotSpot(owner: string, kind: string, victim: string, stage: number): CFrame
+	local x, y = planPoint(owner, kind, victim, stage)
+	local p = ChimeShared.at(x, y, 0) + Vector3.new(0, 3, 0)
+	local tx, ty
+	if stage <= 1 then
+		tx, ty = 0, 0
+	elseif stage >= ChimeShared.STAGES then
+		tx, ty = ChimeShared.sign(victim) * 33, 0
+	else
+		tx, ty = planPoint(owner, kind, victim, stage + 1)
+	end
+	local t = ChimeShared.at(tx, ty, 0)
+	return CFrame.lookAt(p, Vector3.new(t.X, p.Y, t.Z))
+end
 
 -- security cameras: name, where it hangs, what it looks at (plan metres)
 ChimeShared.CAMERAS = {

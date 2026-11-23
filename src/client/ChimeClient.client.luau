@@ -244,7 +244,7 @@ local lastHit = 0
 local function checkBeam()
 	-- tell the server when a robot hunting us is in the beam (it checks too)
 	local map = ChimeShared.map()
-	local folder = map and map:FindFirstChild("Match")
+	local folder = map and map:FindFirstChild("Robots")
 	if not folder then
 		return
 	end
@@ -386,6 +386,24 @@ local function openCams()
 	refreshBar()
 end
 exitCams.Activated:Connect(closeCams)
+
+-- when a robot jumps to a new spot the cameras cut out for a moment
+local glitchUntil = 0
+local function watchRobot(model: Instance)
+	if model:IsA("Model") then
+		model:GetAttributeChangedSignal("ChimeStage"):Connect(function()
+			glitchUntil = os.clock() + 0.7
+		end)
+	end
+end
+task.spawn(function()
+	local map = ChimeShared.map() or workspace:WaitForChild("ChimeMap")
+	local folder = map:WaitForChild("Robots")
+	for _, m in ipairs(folder:GetChildren()) do
+		watchRobot(m)
+	end
+	folder.ChildAdded:Connect(watchRobot)
+end)
 ChimeShared.signal("openCameras").Event:Connect(openCams)
 
 -- while the cameras are up the mouse is free to click the buttons
@@ -393,7 +411,11 @@ RunService:BindToRenderStep("ChimeCameras", Enum.RenderPriority.Camera.Value + 2
 	if camsOpen then
 		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 		UserInputService.MouseIconEnabled = true
-		static.BackgroundTransparency = 0.9 + math.random() * 0.07
+		if os.clock() < glitchUntil then
+			static.BackgroundTransparency = math.random() * 0.25
+		else
+			static.BackgroundTransparency = 0.9 + math.random() * 0.07
+		end
 		rec.Visible = (os.clock() % 1) < 0.6
 	end
 	-- the flashlight follows your view
