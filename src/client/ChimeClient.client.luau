@@ -2,7 +2,7 @@
 --   * a bar at the top with energy, coins, Death Tokens, mask and light
 --   * F: flashlight (sends Glare away when it's in the beam)
 --   * Q: mask (Hollow leaves you alone while it's on; no tablet while worn)
---   * your door: click it to shut / open it (that part is on the server)
+--   * your door: E (or the button in your room) shuts / opens it
 --   * security cameras (opened from the tablet app)
 --   * the jumpscare when a robot gets you, messages, and the result
 
@@ -99,7 +99,7 @@ local hint = text({
 	Size = UDim2.fromOffset(560, 18),
 	TextColor3 = Color3.fromRGB(210, 200, 215),
 	FontFace = Font.new("rbxasset://fonts/families/GothamSSm.json"),
-	Text = "F flashlight · Q mask · click your door to shut it · M tablet (Snake & Minesweeper = coins)",
+	Text = "F flashlight · Q mask · E door · M tablet (Snake & Minesweeper = coins)",
 	Visible = false,
 	Parent = gui,
 })
@@ -432,6 +432,8 @@ UserInputService.InputBegan:Connect(function(input, processed)
 	end
 	if input.KeyCode == Enum.KeyCode.F then
 		event:FireServer("flash", { on = not player:GetAttribute("ChimeFlash") })
+	elseif input.KeyCode == Enum.KeyCode.E then
+		event:FireServer("door")
 	elseif input.KeyCode == Enum.KeyCode.Q then
 		closeCams()
 		event:FireServer("mask", { on = not player:GetAttribute("ChimeMask") })

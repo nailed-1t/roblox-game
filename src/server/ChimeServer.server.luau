@@ -11,7 +11,7 @@
 --     Glare  - leaves when a flashlight is shone on it; walks through doors
 --     Brute  - stopped by a shut door (it bangs on it, then gives up)
 --     Hollow - leaves if your mask is on when it reaches you
--- * Shutting your door (click it) and using the flashlight cost energy.
+-- * Shutting your door (E or the door button) and using the flashlight cost energy.
 -- * Get caught without a Death Token and you lose. 8 minutes without a
 --   winner is a draw. Leaving or dying also loses.
 --
@@ -88,6 +88,11 @@ local function setDoor(side: string, closed: boolean, quiet: boolean?)
 		return
 	end
 	d.closed = closed
+	local post = matchFolder:FindFirstChild("DoorButton" .. side)
+	local button = post and post:FindFirstChild("Button") :: BasePart?
+	if button then
+		button.Color = if closed then Color3.fromRGB(220, 60, 60) else Color3.fromRGB(60, 200, 90)
+	end
 	TweenService:Create(d.part, TweenInfo.new(0.35, Enum.EasingStyle.Quad), { CFrame = if closed then d.closedCF else d.openCF }):Play()
 	if not quiet then
 		d.sound:Play()
@@ -128,6 +133,53 @@ for _, side in ipairs({ "A", "B" }) do
 	click.MouseClick:Connect(function(player)
 		onDoorClicked(player, side)
 	end)
+	-- once open the shutter hides in the wall above the doorway, so each room
+	-- also gets a door button (and players can press E)
+	for _, old in ipairs(matchFolder:GetChildren()) do
+		if old.Name == "DoorButton" .. side then
+			old:Destroy()
+		end
+	end
+	local d = Shared.sign(side)
+	local s = Shared.scale()
+	local buttonPos = Shared.at(d * 28.6, 2.3, 0)
+	local post = Instance.new("Part")
+	post.Name = "DoorButton" .. side
+	post.Anchored = true
+	post.Material = Enum.Material.Metal
+	post.Color = Color3.fromRGB(60, 60, 66)
+	post.Size = Vector3.new(0.5, 1.15 * s, 0.5)
+	post.CFrame = CFrame.new(buttonPos + Vector3.new(0, post.Size.Y / 2, 0))
+	local button = Instance.new("Part")
+	button.Name = "Button"
+	button.Anchored = true
+	button.Material = Enum.Material.Neon
+	button.Color = Color3.fromRGB(60, 200, 90)
+	button.Size = Vector3.new(1.4, 1.4, 1.4)
+	button.CFrame = CFrame.new(buttonPos + Vector3.new(0, post.Size.Y + 0.6, 0))
+	button.Parent = post
+	local buttonClick = Instance.new("ClickDetector")
+	buttonClick.MaxActivationDistance = 40
+	buttonClick.Parent = button
+	buttonClick.MouseClick:Connect(function(player)
+		onDoorClicked(player, side)
+	end)
+	local label = Instance.new("BillboardGui")
+	label.Size = UDim2.fromOffset(110, 22)
+	label.StudsOffset = Vector3.new(0, 1.5, 0)
+	label.MaxDistance = 40
+	label.LightInfluence = 0
+	local labelText = Instance.new("TextLabel")
+	labelText.BackgroundTransparency = 1
+	labelText.Size = UDim2.fromScale(1, 1)
+	labelText.Text = "DOOR (E)"
+	labelText.TextColor3 = Color3.new(1, 1, 1)
+	labelText.TextStrokeTransparency = 0.3
+	labelText.Font = Enum.Font.GothamBold
+	labelText.TextScaled = true
+	labelText.Parent = label
+	label.Parent = button
+	post.Parent = matchFolder
 	-- players can't walk out of their room; robots walk straight through this
 	local barrier = Instance.new("Part")
 	barrier.Name = "Barrier" .. side
@@ -304,6 +356,14 @@ for _, owner in ipairs({ "A", "B" }) do
 	end
 end
 
+local function setTag(r, text: string)
+	local tag = r.root:FindFirstChild("NameTag")
+	local label = tag and tag:FindFirstChildOfClass("TextLabel")
+	if label then
+		label.Text = string.upper(text)
+	end
+end
+
 local function robotAlive(r): boolean
 	return r.active and match ~= nil and match == r.match and not r.match.over
 end
@@ -326,6 +386,7 @@ local function removeRobot(r)
 	r.model:SetAttribute("ChimeVictim", nil)
 	r.model:SetAttribute("ChimeRobotId", nil)
 	r.model:SetAttribute("ChimeState", nil)
+	setTag(r, robotInfo[r.kind].name)
 	setStage(r, 1)
 end
 
@@ -513,6 +574,13 @@ local function summon(m, senderSide: string, kind: string): boolean
 	r.match = m
 	r.victim = m.players[victimSide]
 	setStage(r, 1)
+	if r.victim == m.players[senderSide] then
+		r.active = false -- never hunt your own owner
+		r.match = nil
+		r.victim = nil
+		return false
+	end
+	setTag(r, robotInfo[kind].name .. " · " .. m.names[senderSide])
 	r.model:SetAttribute("ChimeRobotId", r.id)
 	r.model:SetAttribute("ChimeVictim", r.victim.UserId)
 	m.robots[r.id] = r

@@ -36,7 +36,7 @@ ChimeShared.ROBOTS = {
 		speed = 14,
 		interval = 4,
 		chance = 0.65,
-		counter = "Pushes through open doors. Shut your door (click it) until it gives up.",
+		counter = "Pushes through open doors. Shut your door (E or the door button) until it gives up.",
 	},
 	{
 		id = "hollow",
