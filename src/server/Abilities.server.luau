@@ -448,6 +448,9 @@ local USE = {
 }
 
 useRemote.OnServerEvent:Connect(function(player: Player, id: any, ...)
+	if player:GetAttribute("ChimeMatch") then
+		return -- no abilities during a Chime of Conflict match
+	end
 	local item = typeof(id) == "string" and itemsById[id]
 	local use = item and USE[item.id]
 	if not use or not player:GetAttribute("Owned_" .. item.id) then

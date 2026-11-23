@@ -591,8 +591,8 @@ end)
 ---------------------------------------------------------------- open / close
 
 local function open()
-	if isOpen then
-		return
+	if isOpen or player:GetAttribute("ChimeMask") then
+		return -- (you can't use the tablet with the Chime of Conflict mask on)
 	end
 	local tool = heldTool()
 	if not tool or not buildLocalTablet(tool) then
@@ -653,7 +653,19 @@ end
 
 ---------------------------------------------------------------- view events
 
+-- Chime of Conflict: during a match the tablet only has Snake, Minesweeper
+-- and the Chime app
+local CHIME_APPS = { mines = true, snake = true, chime = true }
+local function updateChimeApps()
+	view:setAllowedApps(if player:GetAttribute("ChimeMatch") then CHIME_APPS else nil)
+end
+player:GetAttributeChangedSignal("ChimeMatch"):Connect(updateChimeApps)
+updateChimeApps()
+
 view:on("openApp", function(name)
+	if view.allowedApps and not view.allowedApps[name] then
+		return
+	end
 	if name == "shop" then
 		enterShop()
 		return

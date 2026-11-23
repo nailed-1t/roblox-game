@@ -7,6 +7,8 @@
 --     Same ticket idea; the apple count is capped by how long the run took.
 --   * Buying an item takes its price and sets the player attribute
 --     Owned_<id> (saved too).
+--   * During a Chime of Conflict match (player attribute ChimeMatch) Snake and
+--     Minesweeper pay match coins (attribute ChimeCoins) instead of points.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -133,6 +135,21 @@ task.spawn(function()
 	end
 end)
 
+-- pays a minigame reward: points normally, match coins during Chime of Conflict
+local function pay(player: Player, reward: number): (number, number)
+	if player:GetAttribute("ChimeMatch") then
+		local coins = (player:GetAttribute("ChimeCoins") or 0) + reward
+		player:SetAttribute("ChimeCoins", coins)
+		return reward, coins
+	end
+	local points = pointsValue(player)
+	if not points then
+		return 0, 0
+	end
+	points.Value += reward
+	return reward, points.Value
+end
+
 local function tooFast(player: Player): boolean
 	local now = os.clock()
 	if lastCall[player] and now - lastCall[player] < 0.25 then
@@ -195,13 +212,7 @@ minesRemote.OnServerInvoke = function(player: Player, action: any, data: any)
 		if os.clock() - ticket.started < MIN_SECONDS[ticket.level] then
 			return 0
 		end
-		local points = pointsValue(player)
-		if not points then
-			return 0
-		end
-		local reward = REWARDS[ticket.level]
-		points.Value += reward
-		return reward, points.Value
+		return pay(player, REWARDS[ticket.level])
 	end
 	return nil
 end
@@ -236,12 +247,10 @@ snakeRemote.OnServerInvoke = function(player: Player, action: any, token: any, a
 		if filled == true and eaten >= SNAKE_APPLES_TO_FILL then
 			reward += SNAKE_FILL_BONUS
 		end
-		local points = pointsValue(player)
-		if not points or reward <= 0 then
+		if reward <= 0 then
 			return 0
 		end
-		points.Value += reward
-		return reward, points.Value
+		return pay(player, reward)
 	end
 	return nil
 end

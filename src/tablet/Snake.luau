@@ -706,7 +706,7 @@ function Snake:_refreshPanel()
 		self.banner.Text = if self.won then "You filled the board!" else "Game over"
 		self.banner.TextColor3 = if self.won then COLORS.green else COLORS.red
 		if self.reward and self.reward > 0 then
-			self.statusLabel.Text = string.format("Score %d · +%d points", self.score, self.reward)
+			self.statusLabel.Text = string.format("Score %d · +%d %s", self.score, self.reward, if game:GetService("Players").LocalPlayer:GetAttribute("ChimeMatch") then "coins" else "points")
 		else
 			self.statusLabel.Text = string.format("Length %d · Score %d", #self.body, self.score)
 		end

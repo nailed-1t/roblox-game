@@ -12,6 +12,7 @@ local TabletArt = require(shared:WaitForChild("TabletArt"))
 local Minesweeper = require(shared:WaitForChild("Minesweeper"))
 local Snake = require(shared:WaitForChild("Snake"))
 local FishApp = require(shared:WaitForChild("FishApp"))
+local ChimeApp = require(shared:WaitForChild("ChimeApp"))
 
 local TabletView = {}
 TabletView.__index = TabletView
@@ -205,6 +206,7 @@ function TabletView.new(parent: Instance, options: { fullscreen: boolean? }?)
 		mines = Minesweeper.new(pages).page,
 		snake = Snake.new(pages).page,
 		fish = FishApp.new(pages).page,
+		chime = ChimeApp.new(pages).page,
 	}
 
 	self:_buildHomeIndicator(screen)
@@ -402,6 +404,8 @@ function TabletView:_buildHome(pages: Frame): Frame
 	local minesIcon = appIcon(grid, "Minesweeper", { Color3.fromRGB(96, 110, 150), Color3.fromRGB(40, 46, 70) }, "💣", nil, 3, "appMines")
 	local snakeIcon = appIcon(grid, "Snake", { Color3.fromRGB(120, 220, 110), Color3.fromRGB(30, 120, 60) }, "🐍", nil, 4)
 	local fishIcon = appIcon(grid, "Fish Tank", { Color3.fromRGB(110, 200, 255), Color3.fromRGB(20, 80, 170) }, "🐟", nil, 5)
+	local chimeIcon = appIcon(grid, "Chime of Conflict", { Color3.fromRGB(230, 80, 110), Color3.fromRGB(60, 16, 40) }, "🔔", nil, 6)
+	self.appIcons = { chess = chessIcon, shop = shopIcon, mines = minesIcon, snake = snakeIcon, fish = fishIcon, chime = chimeIcon }
 	chessIcon.Activated:Connect(function()
 		self:_fire("openApp", "chess")
 	end)
@@ -416,6 +420,9 @@ function TabletView:_buildHome(pages: Frame): Frame
 	end)
 	fishIcon.Activated:Connect(function()
 		self:_fire("openApp", "fish")
+	end)
+	chimeIcon.Activated:Connect(function()
+		self:_fire("openApp", "chime")
 	end)
 
 	-- dock
@@ -477,7 +484,22 @@ function TabletView:_buildHome(pages: Frame): Frame
 			self:_fire("openApp", info[1])
 		end)
 	end
+	self.dock = dock
 	return home
+end
+
+-- During a Chime of Conflict match only some apps are allowed; nil = all.
+function TabletView:setAllowedApps(allowed: { [string]: boolean }?)
+	self.allowedApps = allowed
+	for key, icon in pairs(self.appIcons or {}) do
+		icon.Visible = allowed == nil or allowed[key] == true
+	end
+	if self.dock then
+		self.dock.Visible = allowed == nil
+	end
+	if allowed and self.currentPage and self.currentPage ~= "home" and not allowed[self.currentPage] then
+		self:showPage("home")
+	end
 end
 
 function TabletView:_buildHomeIndicator(screen: Frame)

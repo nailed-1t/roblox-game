@@ -672,7 +672,7 @@ function Minesweeper:_refreshPanel()
 	if self.over then
 		if self.won then
 			if self.reward and self.reward > 0 then
-				self.statusLabel.Text = string.format("Cleared in %ds! +%d points", self.lastTime or 0, self.reward)
+				self.statusLabel.Text = string.format("Cleared in %ds! +%d %s", self.lastTime or 0, self.reward, if player:GetAttribute("ChimeMatch") then "coins" else "points")
 			else
 				self.statusLabel.Text = string.format("You cleared it in %ds!", self.lastTime or 0)
 			end
