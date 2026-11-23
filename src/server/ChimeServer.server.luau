@@ -18,7 +18,8 @@
 -- Player attributes during a match (they replicate, so the tablet and the
 -- on-screen controls read them): ChimeMatch, ChimeSide ("A"/"B"),
 -- ChimeOpponent, ChimeCoins, ChimeEnergy, ChimeTokens, ChimeMask, ChimeFlash,
--- ChimeDoor (front), ChimeDoorL, ChimeDoorR (the side doors).
+-- ChimeDoor (front), ChimeDoorL, ChimeDoorR (the side doors), ChimeStartAt
+-- (server time the match goes live, after a countdown in your room).
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -713,7 +714,7 @@ local invites = {} -- [fromUserId] = { from, to, expires }
 local nextMatchId = 0
 
 local function clearPlayer(player: Player)
-	for _, name in ipairs({ "ChimeMatch", "ChimeSide", "ChimeOpponent", "ChimeCoins", "ChimeEnergy", "ChimeTokens", "ChimeMask", "ChimeFlash", "ChimeDoor", "ChimeDoorL", "ChimeDoorR" }) do
+	for _, name in ipairs({ "ChimeMatch", "ChimeSide", "ChimeOpponent", "ChimeCoins", "ChimeEnergy", "ChimeTokens", "ChimeMask", "ChimeFlash", "ChimeDoor", "ChimeDoorL", "ChimeDoorR", "ChimeStartAt" }) do
 		player:SetAttribute(name, nil)
 	end
 end
@@ -779,7 +780,10 @@ local function startMatch(a: Player, b: Player)
 		players = { A = a, B = b },
 		names = { A = nameOf(a), B = nameOf(b) },
 		robots = {},
-		started = os.clock(),
+		-- a countdown in your room first; nothing happens until it ends
+		started = os.clock() + Shared.COUNTDOWN,
+		live = false,
+		passive = { A = 0, B = 0 },
 		over = false,
 		connections = {},
 	}
@@ -797,6 +801,7 @@ local function startMatch(a: Player, b: Player)
 		p:SetAttribute("ChimeDoor", false)
 		p:SetAttribute("ChimeDoorL", false)
 		p:SetAttribute("ChimeDoorR", false)
+		p:SetAttribute("ChimeStartAt", workspace:GetServerTimeNow() + Shared.COUNTDOWN)
 	end
 	for side, p in pairs(m.players) do
 		task.spawn(function()
@@ -831,11 +836,24 @@ task.spawn(function()
 	while true do
 		task.wait(0.25)
 		local m = match
-		if m and not m.over then
+		if m and not m.over and not m.live and os.clock() >= m.started then
+			m.live = true
+			for _, p in pairs(m.players) do
+				send(p, "toast", { text = "🔔 The match has started!" })
+			end
+		end
+		if m and not m.over and m.live then
 			if os.clock() - m.started > Shared.MATCH_SECONDS then
 				endMatch(m, nil, "time")
 			else
 				for side, p in pairs(m.players) do
+					-- passive coins, paid out a whole coin at a time
+					m.passive[side] += Shared.PASSIVE_COINS * 0.25
+					if m.passive[side] >= 1 then
+						local whole = math.floor(m.passive[side])
+						m.passive[side] -= whole
+						p:SetAttribute("ChimeCoins", (p:GetAttribute("ChimeCoins") or 0) + whole)
+					end
 					local e = p:GetAttribute("ChimeEnergy") or 0
 					local use = 0
 					use += Shared.DOOR_DRAIN * closedDoorCount(side)
@@ -960,6 +978,12 @@ event.OnServerEvent:Connect(function(player: Player, action: any, data: any)
 		if not side or not m or m.over then
 			return
 		end
+		if not m.live and action ~= "forfeit" then
+			if action == "buy" then
+				send(player, "toast", { text = "⏳ Wait for the countdown to finish." })
+			end
+			return
+		end
 		if action == "buy" then
 			local id = data.id
 			local coins = player:GetAttribute("ChimeCoins") or 0
@@ -1067,7 +1091,8 @@ end)
 
 -- Studio only: test a match on your own against a stand-in opponent, and send
 -- robots at yourself. ServerStorage.ChimeTest:Invoke("solo", player),
--- :Invoke("summon", "glare"|"brute"|"hollow"), :Invoke("coins", player, n)
+-- :Invoke("summon", "glare"|"brute"|"hollow"), :Invoke("coins", player, n),
+-- :Invoke("go") skips the countdown
 if game:GetService("RunService"):IsStudio() then
 	local test = ServerStorage:FindFirstChild("ChimeTest") or Instance.new("BindableFunction")
 	test.Name = "ChimeTest"
@@ -1094,6 +1119,12 @@ if game:GetService("RunService"):IsStudio() then
 			return true
 		elseif command == "coins" then
 			a:SetAttribute("ChimeCoins", b)
+			return true
+		elseif command == "go" and match then
+			match.started = os.clock() -- skip the countdown
+			for _, p in pairs(match.players) do
+				p:SetAttribute("ChimeStartAt", workspace:GetServerTimeNow())
+			end
 			return true
 		elseif command == "end" and match then
 			endMatch(match, nil, "time")

@@ -12,6 +12,16 @@ ChimeShared.MAX_ENERGY = 200
 ChimeShared.DOOR_DRAIN = 1.2 -- energy per second while your door is shut
 ChimeShared.FLASH_DRAIN = 2 -- energy per second while your flashlight is on
 ChimeShared.MATCH_SECONDS = 8 * 60 -- a draw if nobody has been caught by then
+ChimeShared.COUNTDOWN = 15 -- seconds in your room before the match starts
+ChimeShared.PASSIVE_COINS = 0.5 -- coins per second, just for staying alive
+
+-- the minigames are smaller during a match
+ChimeShared.SNAKE_SIZE = 11 -- board is 11 x 11 (normally 17 x 17)
+ChimeShared.MINES_LEVELS = {
+	easy = { size = 6, mines = 4, minSeconds = 2 },
+	medium = { size = 8, mines = 9, minSeconds = 4 },
+	hard = { size = 10, mines = 15, minSeconds = 7 },
+}
 
 -- Robots: each player owns one of each, waiting in their alcove. Spend coins
 -- to wake one; it then creeps toward your opponent's room FNAF-style: every

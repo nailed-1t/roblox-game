@@ -6,10 +6,14 @@
 -- Points (paid by the server, Economy script): 1 per apple, +100 for
 -- filling the whole board. A run is paid when it ends (or when you start a
 -- new one over a paused run).
+-- During a Chime of Conflict match the board is smaller (ChimeShared.SNAKE_SIZE).
 
 local RunService = game:GetService("RunService")
 local ContextActionService = game:GetService("ContextActionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+
+local ChimeShared = require(ReplicatedStorage:WaitForChild("TabletShared"):WaitForChild("ChimeShared"))
 
 local function snakeRemote(): RemoteFunction?
 	local remotes = ReplicatedStorage:FindFirstChild("ShopRemotes")
@@ -23,7 +27,8 @@ local FONT = Font.new("rbxasset://fonts/families/GothamSSm.json")
 local FONT_BOLD = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Bold)
 local FONT_HEAVY = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Heavy)
 
-local SIZE = 17 -- board is SIZE x SIZE
+local NORMAL_SIZE = 17
+local SIZE = NORMAL_SIZE -- board is SIZE x SIZE (smaller during a Chime match)
 local START_STEP = 0.14 -- seconds per move at the start
 local FASTEST_STEP = 0.07
 local SPEEDUP = 0.0025 -- per apple eaten
@@ -275,20 +280,7 @@ function Snake.new(pages: Instance)
 	self.board = board
 	self.cells = {}
 	local margin = 0.02
-	local step = (1 - 2 * margin) / SIZE
-	for y = 0, SIZE - 1 do
-		for x = 0, SIZE - 1 do
-			local cell = new("Frame", {
-				Name = "C" .. x .. "_" .. y,
-				BorderSizePixel = 0,
-				Position = UDim2.fromScale(margin + x * step, margin + y * step),
-				Size = UDim2.fromScale(step, step),
-				BackgroundColor3 = if (x + y) % 2 == 0 then COLORS.boardA else COLORS.boardB,
-				Parent = board,
-			})
-			self.cells[y * SIZE + x + 1] = cell
-		end
-	end
+	self:_buildGrid()
 	-- the snake and apple are drawn on one layer over the whole grid, so a
 	-- piece can reach into the next square without being covered by it
 	self.layer = new("Frame", {
@@ -352,6 +344,15 @@ function Snake.new(pages: Instance)
 	self.segments = {} -- Frames for the snake body, reused
 	self:reset()
 
+	-- a Chime match starting or ending swaps the board size: end any run
+	Players.LocalPlayer:GetAttributeChangedSignal("ChimeMatch"):Connect(function()
+		if self.state == "playing" or self.state == "paused" then
+			self:_claim(false)
+		end
+		self.state = "ready"
+		self:reset()
+	end)
+
 	-- game loop + keyboard while the screen is up
 	self.bound = false
 	self.clock = 0
@@ -372,6 +373,29 @@ function Snake.new(pages: Instance)
 		end
 	end)
 	return self
+end
+
+-- the checkerboard squares (rebuilt when the board size changes)
+function Snake:_buildGrid()
+	for _, cell in pairs(self.cells) do
+		cell:Destroy()
+	end
+	self.cells = {}
+	local margin = 0.02
+	local step = (1 - 2 * margin) / SIZE
+	for y = 0, SIZE - 1 do
+		for x = 0, SIZE - 1 do
+			local cell = new("Frame", {
+				Name = "C" .. x .. "_" .. y,
+				BorderSizePixel = 0,
+				Position = UDim2.fromScale(margin + x * step, margin + y * step),
+				Size = UDim2.fromScale(step, step),
+				BackgroundColor3 = if (x + y) % 2 == 0 then COLORS.boardA else COLORS.boardB,
+				Parent = self.board,
+			})
+			self.cells[y * SIZE + x + 1] = cell
+		end
+	end
 end
 
 function Snake:_bindKeys(on: boolean)
@@ -406,6 +430,11 @@ end
 ---------------------------------------------------------------- game
 
 function Snake:reset()
+	local want = if Players.LocalPlayer:GetAttribute("ChimeMatch") then ChimeShared.SNAKE_SIZE else NORMAL_SIZE
+	if want ~= SIZE then
+		SIZE = want
+		self:_buildGrid()
+	end
 	local mid = math.floor(SIZE / 2)
 	self.body = { Vector2.new(mid, mid), Vector2.new(mid - 1, mid), Vector2.new(mid - 2, mid) } -- head first
 	self.dir = DIRS.right

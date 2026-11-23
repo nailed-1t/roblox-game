@@ -5,12 +5,14 @@
 --   The first dig is always safe.
 -- Wins earn points (Easy 10, Normal 20, Hard 30), paid by the server
 -- (Economy script) through ShopRemotes.Mines.
+-- During a Chime of Conflict match the boards are smaller (ChimeShared.MINES_LEVELS).
 
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local shared = ReplicatedStorage:WaitForChild("TabletShared")
 local TabletArt = require(shared:WaitForChild("TabletArt"))
+local ChimeShared = require(shared:WaitForChild("ChimeShared"))
 
 local Minesweeper = {}
 Minesweeper.__index = Minesweeper
@@ -135,6 +137,33 @@ local function setPicture(holder: Instance, name: string?)
 end
 
 ---------------------------------------------------------------- build
+
+-- the same three levels, smaller, for Chime of Conflict matches
+local CHIME_LEVELS = {}
+for _, lv in ipairs(LEVELS) do
+	local small = ChimeShared.MINES_LEVELS[lv.key]
+	CHIME_LEVELS[lv.key] = {
+		key = lv.key,
+		name = lv.name,
+		size = small.size,
+		mines = small.mines,
+		points = lv.points,
+		best = lv.key .. "_chime",
+	}
+end
+
+-- the level to play for this difficulty right now
+local function levelFor(key: string)
+	if player:GetAttribute("ChimeMatch") then
+		return CHIME_LEVELS[key]
+	end
+	for _, lv in ipairs(LEVELS) do
+		if lv.key == key then
+			return lv
+		end
+	end
+	return LEVELS[1]
+end
 
 function Minesweeper.new(pages: Instance)
 	local self = setmetatable({}, Minesweeper)
@@ -348,6 +377,11 @@ function Minesweeper.new(pages: Instance)
 		end
 	end)
 
+	-- a match starting or ending swaps the board size
+	player:GetAttributeChangedSignal("ChimeMatch"):Connect(function()
+		self:newGame()
+	end)
+
 	self:newGame()
 	return self
 end
@@ -372,6 +406,7 @@ function Minesweeper:_neighbors(i: number): { number }
 end
 
 function Minesweeper:newGame()
+	self.level = levelFor(self.level.key)
 	local n = self.level.size
 	self.mine = {}
 	self.count = {}
@@ -518,6 +553,7 @@ function Minesweeper:_finish(won: boolean)
 			end
 		end
 		local key = self.level.key
+		key = self.level.best or key
 		if not self.best[key] or seconds < self.best[key] then
 			self.best[key] = seconds
 		end
@@ -687,7 +723,7 @@ function Minesweeper:_refreshPanel()
 	end
 	local have = myPoints()
 	self.pointsLabel.Text = if have then ("⭐ " .. have) else ""
-	local best = self.best[self.level.key]
+	local best = self.best[self.level.best or self.level.key]
 	self.bestLabel.Text = if best then string.format("Best (%s): %ds", self.level.name, best) else ("Best (" .. self.level.name .. "): —")
 end
 

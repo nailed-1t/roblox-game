@@ -115,6 +115,30 @@ local hint = text({
 
 local camsOpen = false -- the security cameras are up
 
+-- the countdown before the match starts
+local countdown = text({
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.36),
+	Size = UDim2.fromOffset(600, 90),
+	TextSize = 54,
+	TextScaled = false,
+	TextColor3 = Color3.fromRGB(255, 225, 140),
+	TextStrokeTransparency = 0.2,
+	Text = "",
+	Visible = false,
+	Parent = gui,
+})
+RunService.Heartbeat:Connect(function()
+	local startAt = player:GetAttribute("ChimeStartAt")
+	local left = if type(startAt) == "number" then startAt - workspace:GetServerTimeNow() else 0
+	if left > 0 then
+		countdown.Visible = true
+		countdown.Text = string.format("🔔 Match starts in %d", math.ceil(left))
+	elseif countdown.Visible then
+		countdown.Visible = false
+	end
+end)
+
 local function inMatch(): boolean
 	return player:GetAttribute("ChimeMatch") ~= nil
 end
@@ -384,6 +408,7 @@ local function closeCams()
 		return
 	end
 	camsOpen = false
+	player:SetAttribute("ChimeCams", false) -- (the crosshair script hides the cursor again)
 	camGui.Visible = false
 	camera.CameraType = Enum.CameraType.Custom
 	camera.FieldOfView = savedFov
@@ -398,6 +423,7 @@ local function openCams()
 		savedFov = camera.FieldOfView
 	end
 	camsOpen = true
+	player:SetAttribute("ChimeCams", true) -- lets the crosshair script show the cursor
 	camGui.Visible = true
 	camera.CameraType = Enum.CameraType.Scriptable
 	showCam(camIndex)

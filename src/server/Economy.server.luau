@@ -8,7 +8,8 @@
 --   * Buying an item takes its price and sets the player attribute
 --     Owned_<id> (saved too).
 --   * During a Chime of Conflict match (player attribute ChimeMatch) Snake and
---     Minesweeper pay match coins (attribute ChimeCoins) instead of points.
+--     Minesweeper pay match coins (attribute ChimeCoins) instead of points,
+--     on the smaller boards from ChimeShared.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -16,11 +17,13 @@ local DataStoreService = game:GetService("DataStoreService")
 local HttpService = game:GetService("HttpService")
 
 local ShopItems = require(ReplicatedStorage:WaitForChild("TabletShared"):WaitForChild("ShopItems"))
+local ChimeShared = require(ReplicatedStorage:WaitForChild("TabletShared"):WaitForChild("ChimeShared"))
 
 local REWARDS = { easy = 10, medium = 20, hard = 30 }
 local MIN_SECONDS = { easy = 4, medium = 10, hard = 20 } -- faster "wins" aren't real
 local STORE_NAME = "Economy_v1"
 local SNAKE_APPLES_TO_FILL = 17 * 17 - 3 -- board size minus the starting snake
+local CHIME_SNAKE_APPLES_TO_FILL = ChimeShared.SNAKE_SIZE * ChimeShared.SNAKE_SIZE - 3
 local SNAKE_FILL_BONUS = 100
 local SNAKE_SECONDS_PER_APPLE = 0.2 -- nobody eats faster than this
 
@@ -201,7 +204,7 @@ minesRemote.OnServerInvoke = function(player: Player, action: any, data: any)
 			end
 		end
 		local token = HttpService:GenerateGUID(false)
-		mine[token] = { level = data, started = os.clock() }
+		mine[token] = { level = data, started = os.clock(), chime = player:GetAttribute("ChimeMatch") ~= nil }
 		return token
 	elseif action == "win" then
 		local ticket = typeof(data) == "string" and mine[data]
@@ -209,7 +212,8 @@ minesRemote.OnServerInvoke = function(player: Player, action: any, data: any)
 			return 0
 		end
 		mine[data] = nil
-		if os.clock() - ticket.started < MIN_SECONDS[ticket.level] then
+		local minSeconds = if ticket.chime then ChimeShared.MINES_LEVELS[ticket.level].minSeconds else MIN_SECONDS[ticket.level]
+		if os.clock() - ticket.started < minSeconds then
 			return 0
 		end
 		return pay(player, REWARDS[ticket.level])
@@ -232,19 +236,20 @@ snakeRemote.OnServerInvoke = function(player: Player, action: any, token: any, a
 			end
 		end
 		local t = HttpService:GenerateGUID(false)
-		mine[t] = os.clock()
+		mine[t] = { started = os.clock(), chime = player:GetAttribute("ChimeMatch") ~= nil }
 		return t
 	elseif action == "finish" then
-		local started = typeof(token) == "string" and mine[token]
-		if not started then
+		local ticket = typeof(token) == "string" and mine[token]
+		if not ticket then
 			return 0
 		end
 		mine[token] = nil
-		local elapsed = os.clock() - started
+		local toFill = if ticket.chime then CHIME_SNAKE_APPLES_TO_FILL else SNAKE_APPLES_TO_FILL
+		local elapsed = os.clock() - ticket.started
 		local eaten = math.floor(tonumber(apples) or 0)
-		eaten = math.clamp(eaten, 0, math.min(SNAKE_APPLES_TO_FILL, math.floor(elapsed / SNAKE_SECONDS_PER_APPLE)))
+		eaten = math.clamp(eaten, 0, math.min(toFill, math.floor(elapsed / SNAKE_SECONDS_PER_APPLE)))
 		local reward = eaten
-		if filled == true and eaten >= SNAKE_APPLES_TO_FILL then
+		if filled == true and eaten >= toFill then
 			reward += SNAKE_FILL_BONUS
 		end
 		if reward <= 0 then
