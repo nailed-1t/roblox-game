@@ -902,6 +902,25 @@ onDoorClicked = function(player: Player, side: string, which: string?)
 	end
 end
 
+-- a test opponent that does nothing (never buys anything, never moves):
+-- just enough of a Player for the match code to hold its attributes
+local function makeDummy(): any
+	local attrs = {}
+	return {
+		Name = "Test dummy",
+		DisplayName = "Test dummy",
+		UserId = -1,
+		Character = nil,
+		SetAttribute = function(_, k, v)
+			attrs[k] = v
+		end,
+		GetAttribute = function(_, k)
+			return attrs[k]
+		end,
+		RequestStreamAroundAsync = function() end,
+	}
+end
+
 ---------------------------------------------------------------- requests
 
 local lastCall = {}
@@ -919,7 +938,22 @@ event.OnServerEvent:Connect(function(player: Player, action: any, data: any)
 		lastCall[player] = now
 	end
 
-	if action == "challenge" then
+	if action == "dummy" then
+		-- play against the test dummy
+		if sideOf(player) then
+			return
+		end
+		if match then
+			send(player, "toast", { text = "Someone is already playing Chime of Conflict — try again after their match." })
+			return
+		end
+		local inv = invites[player.UserId]
+		if inv then
+			invites[player.UserId] = nil
+			send(inv.to, "inviteGone", { from = player.UserId })
+		end
+		startMatch(player, makeDummy())
+	elseif action == "challenge" then
 		local target = if type(data.target) == "number" then Players:GetPlayerByUserId(data.target) else nil
 		if not target or target == player or sideOf(player) then
 			return
@@ -1099,21 +1133,7 @@ if game:GetService("RunService"):IsStudio() then
 	test.Parent = ServerStorage
 	test.OnInvoke = function(command: string, a: any, b: any)
 		if command == "solo" then
-			local attrs = {}
-			local standIn = {
-				Name = "Stand-in",
-				DisplayName = "Stand-in",
-				UserId = -1,
-				Character = nil,
-				SetAttribute = function(_, k, v)
-					attrs[k] = v
-				end,
-				GetAttribute = function(_, k)
-					return attrs[k]
-				end,
-				RequestStreamAroundAsync = function() end,
-			}
-			return startMatch(a, standIn :: any)
+			return startMatch(a, makeDummy())
 		elseif command == "summon" and match then
 			summon(match, "B", a)
 			return true

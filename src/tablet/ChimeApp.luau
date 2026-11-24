@@ -254,8 +254,33 @@ function ChimeApp:_renderLobby()
 	table.sort(others, function(a, b)
 		return a.DisplayName:lower() < b.DisplayName:lower()
 	end)
+	-- a test opponent that does nothing, always there (for trying things out)
+	local dummyRow = new("Frame", {
+		Name = "Dummy",
+		LayoutOrder = 0,
+		Size = UDim2.new(1, -6, 0, 42),
+		BackgroundColor3 = Color3.fromRGB(34, 40, 50),
+		Parent = self.playerList,
+	}, { corner(0.25) })
+	label({ Position = UDim2.fromScale(0.05, 0.08), Size = UDim2.fromScale(0.58, 0.5), FontFace = FONT_MED, Text = "🧪 Test dummy", Parent = dummyRow })
+	label({ Position = UDim2.fromScale(0.05, 0.56), Size = UDim2.fromScale(0.58, 0.34), TextColor3 = C.sub, Text = "does nothing · for testing", Parent = dummyRow })
+	local dummyButton = button({
+		Name = "Play",
+		Text = if self.busy then "Busy" else "Play",
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.fromScale(0.97, 0.5),
+		Size = UDim2.fromScale(0.34, 0.72),
+		Active = not self.busy,
+	}, if self.busy then C.gray else C.accent)
+	dummyButton.Parent = dummyRow
+	dummyButton.Activated:Connect(function()
+		if not self.busy then
+			fire("dummy")
+		end
+	end)
 	if #others == 0 then
 		label({
+			LayoutOrder = 1,
 			Size = UDim2.new(1, 0, 0, 34),
 			TextColor3 = C.sub,
 			TextXAlignment = Enum.TextXAlignment.Center,
@@ -266,7 +291,7 @@ function ChimeApp:_renderLobby()
 	for i, p in ipairs(others) do
 		local row = new("Frame", {
 			Name = "P" .. p.UserId,
-			LayoutOrder = i,
+			LayoutOrder = i + 1,
 			Size = UDim2.new(1, -6, 0, 42),
 			BackgroundColor3 = Color3.fromRGB(46, 34, 50),
 			Parent = self.playerList,
