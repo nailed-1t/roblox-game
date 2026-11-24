@@ -553,7 +553,7 @@ ChimeShared.signal("openCameras").Event:Connect(openCams)
 RunService:BindToRenderStep("ChimeCameras", Enum.RenderPriority.Camera.Value + 2, function()
 	if camsOpen then
 		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-		UserInputService.MouseIconEnabled = true
+		-- (the cursor itself is drawn as a circle by the Crosshair script)
 		if os.clock() < glitchUntil then
 			static.BackgroundTransparency = math.random() * 0.25
 		else
