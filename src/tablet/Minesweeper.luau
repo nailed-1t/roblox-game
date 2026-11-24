@@ -535,6 +535,10 @@ function Minesweeper:_toggleFlag(i: number)
 	if self.over or self.open[i] then
 		return
 	end
+	-- no more flags than there are mines (the counter never goes below 0)
+	if not self.flag[i] and self.flags >= self.level.mines then
+		return
+	end
 	self.flag[i] = not self.flag[i] or nil
 	self.flags += if self.flag[i] then 1 else -1
 end
@@ -702,7 +706,7 @@ function Minesweeper:_refreshPanel()
 		})
 		t.Text = FALLBACK[faceName]
 	end
-	self.minesLabel.Text = tostring(self.level.mines - self.flags)
+	self.minesLabel.Text = tostring(math.max(0, self.level.mines - self.flags))
 	self.flagText.Text = if self.flagMode then "Flag mode: ON" else "Flag mode: off"
 	self.flagButton.BackgroundColor3 = if self.flagMode then Color3.fromRGB(150, 52, 58) else COLORS.card
 	if self.over then

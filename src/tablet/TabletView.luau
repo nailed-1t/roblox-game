@@ -4,6 +4,7 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
 
 local shared = ReplicatedStorage:WaitForChild("TabletShared")
 local PieceArt = require(shared:WaitForChild("PieceArt"))
@@ -817,7 +818,17 @@ function TabletView:_buildChess(pages: Frame): Frame
 			end
 			self.squares[row][col] = { button = sq, highlight = hl, dot = dot, ring = ring, piece = pieceHolder, code = nil }
 			sq.Activated:Connect(function()
+				self:clearArrows()
 				self:_fire("square", row, col)
+			end)
+			sq.InputBegan:Connect(function(input)
+				if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+					self._markFrom = { row, col }
+					self._markOver = { row, col }
+				end
+			end)
+			sq.MouseEnter:Connect(function()
+				self._markOver = { row, col }
 			end)
 			-- right-click cancels a premove (like chess.com)
 			sq.MouseButton2Click:Connect(function()
@@ -826,6 +837,28 @@ function TabletView:_buildChess(pages: Frame): Frame
 		end
 	end
 	self.board = board
+	board.MouseLeave:Connect(function()
+		self._markOver = nil
+	end)
+	-- arrows (like chess.com): press on one square, let go on another
+	self.arrowLayer = new("Frame", {
+		Name = "Arrows",
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		ZIndex = 6,
+		Parent = board,
+	})
+	self.arrows = {} -- ["r1,c1>r2,c2"] = CanvasGroup
+	UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
+			return
+		end
+		local from, over = self._markFrom, self._markOver
+		self._markFrom = nil
+		if from and over and (from[1] ~= over[1] or from[2] ~= over[2]) then
+			self:_toggleArrow(from[1], from[2], over[1], over[2])
+		end
+	end)
 
 	-- side panel
 	local side = new("Frame", {
@@ -911,6 +944,71 @@ function TabletView:_buildChess(pages: Frame): Frame
 		AutomaticCanvasSize = Enum.AutomaticSize.Y,
 		Parent = movesCard,
 	}, { new("UIListLayout", { Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder }) })
+	self.moveList.Size = UDim2.new(0.9, 0, 0.9, -8)
+
+	-- drag the grip at the bottom of the moves box to make it smaller or
+	-- bigger (your own card moves with it)
+	local MOVES_TOP, MOVES_MIN, MOVES_MAX = 0.26, 0.1, 0.56
+	local grip = new("TextButton", {
+		Name = "Grip",
+		Text = "",
+		AutoButtonColor = false,
+		AnchorPoint = Vector2.new(0.5, 1),
+		Position = UDim2.new(0.5, 0, 1, -2),
+		Size = UDim2.new(0.3, 0, 0, 12),
+		BackgroundTransparency = 1,
+		ZIndex = 3,
+		Parent = movesCard,
+	})
+	local gripBar = new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.new(1, 0, 0, 4),
+		BackgroundColor3 = C.sub,
+		BackgroundTransparency = 0.4,
+		ZIndex = 3,
+		Parent = grip,
+	}, { corner(UDim.new(0.5, 0)) })
+	local CARD_LOWEST = 0.84 - 0.12 - 0.01 -- your card can't go past the buttons
+	local function setMovesHeight(h: number)
+		-- with a clock running your card (and clock) always stays in view;
+		-- without one the box can grow over it
+		local maxH = if self.meCardInfo.clock.Visible then CARD_LOWEST - 0.02 - MOVES_TOP else MOVES_MAX
+		h = math.clamp(h, MOVES_MIN, maxH)
+		movesCard.Size = UDim2.fromScale(1, h)
+		local cardY = MOVES_TOP + h + 0.02
+		self.meCardInfo.card.Position = UDim2.fromScale(0, math.min(cardY, CARD_LOWEST))
+		self.meCardInfo.card.Visible = cardY <= CARD_LOWEST + 1e-6
+		self.movesHeight = h
+	end
+	local resizing = false
+	grip.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			resizing = true
+			gripBar.BackgroundTransparency = 0
+		end
+	end)
+	grip.MouseEnter:Connect(function()
+		gripBar.BackgroundTransparency = 0.1
+	end)
+	grip.MouseLeave:Connect(function()
+		if not resizing then
+			gripBar.BackgroundTransparency = 0.4
+		end
+	end)
+	UserInputService.InputChanged:Connect(function(input)
+		if resizing and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+			local top = side.AbsolutePosition.Y + side.AbsoluteSize.Y * MOVES_TOP
+			setMovesHeight((input.Position.Y - top) / side.AbsoluteSize.Y)
+		end
+	end)
+	UserInputService.InputEnded:Connect(function(input)
+		if resizing and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
+			resizing = false
+			gripBar.BackgroundTransparency = 0.4
+		end
+	end)
+	self._setMovesHeight = setMovesHeight
 
 	-- buttons: [Resign] [Draw] [⚙] while playing; [Back]/[Stop watching] [⚙] otherwise
 	self.resignButton = button({ Name = "Resign", Text = "Resign", Position = UDim2.fromScale(0, 0.84), Size = UDim2.fromScale(0.41, 0.1) }, Color3.fromRGB(70, 30, 34), Color3.fromRGB(255, 120, 110))
@@ -1428,6 +1526,10 @@ function TabletView:renderGame(snap, view)
 	-- move list
 	clear(self.moveList)
 	local moves = snap.moves or {}
+	if self._arrowMoves ~= #moves then
+		self._arrowMoves = #moves
+		self:clearArrows()
+	end
 	for i = 1, #moves, 2 do
 		local n = (i + 1) // 2
 		local row = label({
@@ -1443,6 +1545,105 @@ function TabletView:renderGame(snap, view)
 		row.TextColor3 = C.text
 	end
 	self.moveList.CanvasPosition = Vector2.new(0, 1e6)
+end
+
+-- arrows on the board (in board squares: 1 = one square)
+local ARROW_COLOR = Color3.fromRGB(255, 170, 0)
+local ARROW_WIDTH = 0.26
+local HEAD_WIDTH = 0.62
+local HEAD_LENGTH = 0.42
+
+-- a straight bar from (x1, y1) to (x2, y2), in square units
+local function arrowBar(parent: Instance, x1: number, y1: number, x2: number, y2: number, width: number)
+	local dx, dy = x2 - x1, y2 - y1
+	local len = math.sqrt(dx * dx + dy * dy)
+	new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale((x1 + x2) / 2 / 8, (y1 + y2) / 2 / 8),
+		Size = UDim2.fromScale(len / 8, width / 8),
+		Rotation = math.deg(math.atan2(dy, dx)),
+		BackgroundColor3 = ARROW_COLOR,
+		BorderSizePixel = 0,
+		Parent = parent,
+	})
+end
+
+-- a triangle pointing from (bx, by) to the tip (tx, ty), built from thin slices
+local function arrowHead(parent: Instance, bx: number, by: number, tx: number, ty: number)
+	local dx, dy = tx - bx, ty - by
+	local holder = new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale((bx + tx) / 2 / 8, (by + ty) / 2 / 8),
+		Size = UDim2.fromScale(HEAD_LENGTH / 8, HEAD_WIDTH / 8),
+		Rotation = math.deg(math.atan2(dy, dx)),
+		BackgroundTransparency = 1,
+		Parent = parent,
+	})
+	local slices = 12
+	for i = 0, slices - 1 do
+		new("Frame", {
+			AnchorPoint = Vector2.new(0, 0.5),
+			Position = UDim2.fromScale(i / slices, 0.5),
+			Size = UDim2.fromScale(1 / slices + 0.002, 1 - (i + 0.5) / slices),
+			BackgroundColor3 = ARROW_COLOR,
+			BorderSizePixel = 0,
+			Parent = holder,
+		})
+	end
+end
+
+-- draw (or remove, if it's already there) an arrow between two squares;
+-- knight moves get an L-shaped arrow
+function TabletView:_toggleArrow(r1: number, c1: number, r2: number, c2: number)
+	local key = string.format("%d,%d>%d,%d", r1, c1, r2, c2)
+	if self.arrows[key] then
+		self.arrows[key]:Destroy()
+		self.arrows[key] = nil
+		return
+	end
+	-- the arrow is drawn solid inside a CanvasGroup, then faded as one, so
+	-- the overlapping pieces don't show darker
+	local group = new("CanvasGroup", {
+		Name = key,
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		GroupTransparency = 0.2,
+		ZIndex = 6,
+		Parent = self.arrowLayer,
+	})
+	local x1, y1 = c1 - 0.5, r1 - 0.5
+	local x2, y2 = c2 - 0.5, r2 - 0.5
+	local dr, dc = math.abs(r2 - r1), math.abs(c2 - c1)
+	if (dr == 2 and dc == 1) or (dr == 1 and dc == 2) then
+		-- L: along the long side first, then turn
+		local kx, ky = if dr > dc then x1 else x2, if dr > dc then y2 else y1
+		arrowBar(group, x1, y1, kx, ky, ARROW_WIDTH)
+		-- square off the corner
+		new("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromScale(kx / 8, ky / 8),
+			Size = UDim2.fromScale(ARROW_WIDTH / 8, ARROW_WIDTH / 8),
+			BackgroundColor3 = ARROW_COLOR,
+			BorderSizePixel = 0,
+			Parent = group,
+		})
+		x1, y1 = kx, ky
+	end
+	local dx, dy = x2 - x1, y2 - y1
+	local len = math.sqrt(dx * dx + dy * dy)
+	local ux, uy = dx / len, dy / len
+	local tipX, tipY = x2 + ux * 0.18, y2 + uy * 0.18
+	local baseX, baseY = tipX - ux * HEAD_LENGTH, tipY - uy * HEAD_LENGTH
+	arrowBar(group, x1, y1, baseX, baseY, ARROW_WIDTH)
+	arrowHead(group, baseX, baseY, tipX, tipY)
+	self.arrows[key] = group
+end
+
+function TabletView:clearArrows()
+	for key, group in pairs(self.arrows) do
+		group:Destroy()
+		self.arrows[key] = nil
+	end
 end
 
 function TabletView:showPromotion(color: string?)
