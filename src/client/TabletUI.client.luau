@@ -325,6 +325,8 @@ end
 
 local camera = workspace.CurrentCamera
 local SCREEN_FILL = 0.9 -- how much of the screen the tablet covers
+local zoomed = false -- zoomed in: the tablet's display (not the whole tablet) fills the view
+local zoomT = 0 -- 0 = normal, 1 = zoomed (eases between the two)
 local OPEN_TIME = 0.45
 local CLOSE_TIME = 0.3
 
@@ -436,6 +438,13 @@ local function placeLocalTablet(t: number)
 	local aspect = vp.X / math.max(vp.Y, 1)
 	local distH = tabletSize.Y / (SCREEN_FILL * 2 * tanHalf)
 	local distW = tabletSize.X / (SCREEN_FILL * 2 * tanHalf * aspect)
+	zoomT += ((if zoomed then 1 else 0) - zoomT) * 0.2
+	if zoomT > 0.001 and localDisplay then
+		local zH = localDisplay.Size.Y / (0.97 * 2 * tanHalf)
+		local zW = localDisplay.Size.X / (0.99 * 2 * tanHalf * aspect)
+		distH += (zH - distH) * zoomT
+		distW += (zW - distW) * zoomT
+	end
 	local dist = math.max(distH, distW, 0.6)
 	local viewHeight = 2 * dist * tanHalf
 	local e = TweenService:GetValue(t, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
@@ -698,6 +707,11 @@ end)
 view:on("watch", function(id)
 	chessEvent:FireServer("watch", { game = id })
 end)
+view:on("zoom", function()
+	zoomed = not zoomed
+	view:setZoomed(zoomed)
+end)
+
 view:on("settings", function()
 	settingsOpen = true
 	renderChess()

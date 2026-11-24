@@ -1026,6 +1026,14 @@ function TabletView:_buildChess(pages: Frame): Frame
 	self.backButton.Activated:Connect(function()
 		self:_fire("leaveGame")
 	end)
+	-- zoom: brings the tablet up close so the board fills your view
+	self.zoomButton = button({ Name = "Zoom", Text = "🔍", Position = UDim2.fromScale(0.86, 0.135), Size = UDim2.fromScale(0.14, 0.1) }, C.card)
+	self.zoomButton.Parent = side
+	self.zoomButton.Activated:Connect(function()
+		self:_fire("zoom")
+	end)
+	self.statusLabel.Size = UDim2.fromScale(0.84, 0.065)
+	self.modeLabel.Size = UDim2.fromScale(0.84, 0.04)
 	local gameGear = button({ Name = "Settings", Text = "⚙", Position = UDim2.fromScale(0.86, 0.84), Size = UDim2.fromScale(0.14, 0.1) }, C.card)
 	gameGear.Parent = side
 	gameGear.Activated:Connect(function()
@@ -1637,6 +1645,13 @@ function TabletView:_toggleArrow(r1: number, c1: number, r2: number, c2: number)
 	arrowBar(group, x1, y1, baseX, baseY, ARROW_WIDTH)
 	arrowHead(group, baseX, baseY, tipX, tipY)
 	self.arrows[key] = group
+end
+
+-- the zoom button shows whether the tablet is zoomed in
+function TabletView:setZoomed(on: boolean)
+	if self.zoomButton then
+		self.zoomButton.BackgroundColor3 = if on then C.blue else C.card
+	end
 end
 
 function TabletView:clearArrows()

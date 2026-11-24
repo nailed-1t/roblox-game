@@ -101,6 +101,27 @@ local BUILDERS = {
 local CELL = 128
 local COLUMN = { K = 0, Q = 1, B = 2, N = 3, R = 4, P = 5 }
 
+local function asImage(id: any): string?
+	if typeof(id) == "number" then
+		id = "rbxassetid://" .. id
+	end
+	if typeof(id) == "string" and id ~= "" then
+		if not string.find(id, "://") then
+			id = "rbxassetid://" .. id
+		end
+		return id
+	end
+	return nil
+end
+
+-- Sharper pictures for single pieces: set an "Image_<code>" attribute on
+-- this ModuleScript (e.g. Image_wP = rbxassetid://123) to a square picture
+-- of that piece (256x256, standing in the same spot as on the sheet). It is
+-- used instead of the sheet's 128px cell. Source files: assets/pieces/.
+local function pieceImage(code: string): string?
+	return asImage(script:GetAttribute("Image_" .. code))
+end
+
 local function sheetImage(): string?
 	local id = script:GetAttribute("SheetImage")
 	if typeof(id) == "number" then
@@ -123,6 +144,19 @@ function PieceArt.make(code: string): Frame
 	holder.Size = UDim2.fromScale(1, 1)
 	local color = string.sub(code, 1, 1)
 	local kind = string.sub(code, 2, 2)
+	local own = pieceImage(code)
+	if own then
+		local pic = Instance.new("ImageLabel")
+		pic.Name = "Picture"
+		pic.BackgroundTransparency = 1
+		pic.AnchorPoint = Vector2.new(0.5, 0.5)
+		pic.Position = UDim2.fromScale(0.5, 0.5)
+		pic.Size = UDim2.fromScale(1, 1)
+		pic.Image = own
+		pic.ScaleType = Enum.ScaleType.Fit
+		pic.Parent = holder
+		return holder
+	end
 	local image = sheetImage()
 	if image and COLUMN[kind] then
 		local pic = Instance.new("ImageLabel")
