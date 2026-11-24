@@ -189,8 +189,11 @@ for _, side in ipairs({ "A", "B" }) do
 	barrier.CanQuery = false
 	barrier.CanTouch = false
 	barrier.CastShadow = false
-	barrier.Size = Vector3.new(1, size.Y + 4, size.Z)
-	barrier.CFrame = cf
+	-- floor to ceiling, so nobody can climb (e.g. on the door button) and
+	-- jump out over it
+	local floorY = Shared.at(0, 0, 0).Y
+	barrier.Size = Vector3.new(1, 20, size.Z)
+	barrier.CFrame = CFrame.new(cf.Position.X, floorY + 10, cf.Position.Z) * cf.Rotation
 	barrier.CollisionGroup = "ChimeBarrier"
 	barrier.Parent = matchFolder
 end
@@ -236,8 +239,10 @@ do
 			barrier.CanQuery = false
 			barrier.CanTouch = false
 			barrier.CastShadow = false
-			barrier.Size = Vector3.new(body.Size.X, body.Size.Y + 6, 1.2)
-			barrier.CFrame = CFrame.new(body.Position + Vector3.new(0, 3, entry * 0.9))
+			-- floor to ceiling (see the front barrier)
+			local floorY = Shared.at(0, 0, 0).Y
+			barrier.Size = Vector3.new(body.Size.X, 20, 1.2)
+			barrier.CFrame = CFrame.new(body.Position.X, floorY + 10, body.Position.Z + entry * 0.9)
 			barrier.CollisionGroup = "ChimeBarrier"
 			for _, old in ipairs(matchFolder:GetChildren()) do
 				if old.Name == barrier.Name then

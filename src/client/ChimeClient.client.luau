@@ -63,7 +63,7 @@ local gui = new("ScreenGui", {
 	Name = "ChimeHUD",
 	ResetOnSpawn = false,
 	IgnoreGuiInset = true,
-	DisplayOrder = 20,
+	DisplayOrder = 25, -- above the tablet (20), so nothing ends up hidden behind it
 	Parent = player:WaitForChild("PlayerGui"),
 })
 
@@ -548,6 +548,23 @@ task.spawn(function()
 	folder.ChildAdded:Connect(watchRobot)
 end)
 ChimeShared.signal("openCameras").Event:Connect(openCams)
+
+-- the tablet and the cameras can't both be up: taking the tablet out closes
+-- the cameras. While the tablet is out, the countdown moves to the strip
+-- above it and messages to the strip below it (instead of covering its screen).
+local function placeTexts()
+	local tabletOut = player:GetAttribute("TabletOpen") == true
+	toastLabel.Position = if tabletOut then UDim2.new(0.5, 0, 1, -34) else UDim2.new(0.5, 0, 0, 178)
+	countdown.Position = if tabletOut then UDim2.new(0.5, 0, 0, 20) else UDim2.fromScale(0.5, 0.36)
+	countdown.TextSize = if tabletOut then 26 else 54
+end
+player:GetAttributeChangedSignal("TabletOpen"):Connect(function()
+	if player:GetAttribute("TabletOpen") and camsOpen then
+		closeCams()
+	end
+	placeTexts()
+end)
+placeTexts()
 
 -- while the cameras are up the mouse is free to click the buttons
 RunService:BindToRenderStep("ChimeCameras", Enum.RenderPriority.Camera.Value + 2, function()
