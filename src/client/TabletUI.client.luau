@@ -789,6 +789,41 @@ local function sendMove(m, promo: string?)
 	chessEvent:FireServer("move", { fr = m.fr, fc = m.fc, tr = m.tr, tc = m.tc, promo = promo })
 end
 
+-- screen square -> board square
+local function boardSquare(row: number, col: number): (number, number)
+	local flip = bottomColor() == "b"
+	return if flip then row else 9 - row, if flip then 9 - col else col
+end
+
+-- you can pick up (drag) your own pieces whenever you could click them
+view.canDrag = function(row: number, col: number): boolean
+	if not game_ or game_.over or spectating() or pendingPromotion then
+		return false
+	end
+	if game_.turn ~= myColor and not settings.premoves then
+		return false
+	end
+	local r, c = boardSquare(row, col)
+	local piece = game_.board[r][c]
+	return piece ~= "" and string.sub(piece, 1, 1) == myColor
+end
+
+-- a piece was picked up: select it (dropping it on a square then sends a
+-- normal "square" click there, which plays the move if it's legal)
+view:on("dragStart", function(row: number, col: number)
+	if not view.canDrag(row, col) then
+		return
+	end
+	local r, c = boardSquare(row, col)
+	if selected and selected[1] == r and selected[2] == c then
+		return
+	end
+	premove = nil
+	selected = { r, c }
+	targets = if game_.turn == myColor then ChessRules.legalMovesFrom(stateOf(game_), r, c) else premoveTargets(r, c)
+	renderChess()
+end)
+
 view:on("square", function(row: number, col: number)
 	if not game_ or game_.over or spectating() or pendingPromotion then
 		return

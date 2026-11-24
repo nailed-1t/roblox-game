@@ -5,6 +5,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
+local GuiService = game:GetService("GuiService")
 
 local shared = ReplicatedStorage:WaitForChild("TabletShared")
 local PieceArt = require(shared:WaitForChild("PieceArt"))
@@ -817,18 +818,20 @@ function TabletView:_buildChess(pages: Frame): Frame
 				label({ Name = "File", Position = UDim2.fromScale(0.68, 0.72), Size = UDim2.fromScale(0.3, 0.25), Text = "", TextTransparency = 0.25, TextColor3 = Color3.fromRGB(90, 60, 40), FontFace = FONT_BOLD, TextXAlignment = Enum.TextXAlignment.Right, Parent = sq })
 			end
 			self.squares[row][col] = { button = sq, highlight = hl, dot = dot, ring = ring, piece = pieceHolder, code = nil }
-			sq.Activated:Connect(function()
-				self:clearArrows()
-				self:_fire("square", row, col)
-			end)
+			-- left: click a square, or press on your piece and drag it (see
+			-- _boardInput); right: drag between squares to draw an arrow
 			sq.InputBegan:Connect(function(input)
-				if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-					self._markFrom = { row, col }
-					self._markOver = { row, col }
+				local t = input.UserInputType
+				if t == Enum.UserInputType.MouseButton1 or t == Enum.UserInputType.Touch then
+					self._press = { row = row, col = col, at = Vector2.new(input.Position.X, input.Position.Y) }
+					self._overSq = { row, col }
+				elseif t == Enum.UserInputType.MouseButton2 then
+					self._arrowFrom = { row, col }
+					self._overSq = { row, col }
 				end
 			end)
 			sq.MouseEnter:Connect(function()
-				self._markOver = { row, col }
+				self._overSq = { row, col }
 			end)
 			-- right-click cancels a premove (like chess.com)
 			sq.MouseButton2Click:Connect(function()
@@ -838,7 +841,7 @@ function TabletView:_buildChess(pages: Frame): Frame
 	end
 	self.board = board
 	board.MouseLeave:Connect(function()
-		self._markOver = nil
+		self._overSq = nil
 	end)
 	-- arrows (like chess.com): press on one square, let go on another
 	self.arrowLayer = new("Frame", {
@@ -849,16 +852,7 @@ function TabletView:_buildChess(pages: Frame): Frame
 		Parent = board,
 	})
 	self.arrows = {} -- ["r1,c1>r2,c2"] = CanvasGroup
-	UserInputService.InputEnded:Connect(function(input)
-		if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
-			return
-		end
-		local from, over = self._markFrom, self._markOver
-		self._markFrom = nil
-		if from and over and (from[1] ~= over[1] or from[2] ~= over[2]) then
-			self:_toggleArrow(from[1], from[2], over[1], over[2])
-		end
-	end)
+	self:_boardInput()
 
 	-- side panel
 	local side = new("Frame", {
@@ -1443,6 +1437,7 @@ function TabletView:renderGame(snap, view)
 			local sq = self.squares[row][col]
 			sq.button.BackgroundColor3 = if (row + col) % 2 == 0 then theme.light else theme.dark
 			local code = snap.board[r][c]
+			sq.piece.Visible = not (self._drag ~= nil and self._drag.row == row and self._drag.col == col)
 			if sq.code ~= code then
 				sq.code = code
 				for _, ch in ipairs(sq.piece:GetChildren()) do
@@ -1652,6 +1647,106 @@ function TabletView:setZoomed(on: boolean)
 	if self.zoomButton then
 		self.zoomButton.BackgroundColor3 = if on then C.blue else C.card
 	end
+end
+
+-- mouse handling for the board:
+--   * left click a square (no dragging): same as before ("square")
+--   * left press on a piece the controller lets you move (self.canDrag) and
+--     move the mouse: the piece follows the cursor; let go on a square to
+--     play there ("dragStart" picks it up, "square" on the drop square plays
+--     it if that's a legal move), anywhere else and it goes back
+--   * right press on a square and let go on another: arrow; right click on
+--     one square: "cancelPremove"
+local DRAG_START = 6 -- pixels the mouse has to move before a press becomes a drag
+function TabletView:_boardInput()
+	-- the mouse in the same pixels as AbsolutePosition (which is measured
+	-- from below the top bar, even in a gui that ignores the inset)
+	local function mousePos(): Vector2
+		return UserInputService:GetMouseLocation() - GuiService:GetGuiInset()
+	end
+	local function placeGhost()
+		local drag = self._drag
+		if not drag then
+			return
+		end
+		local area = self.arrowLayer -- exactly the 8x8 squares (inside the board's border)
+		local at = mousePos()
+		local rel = (at - area.AbsolutePosition) / area.AbsoluteSize
+		drag.ghost.Position = UDim2.fromScale(rel.X, rel.Y)
+	end
+	local function stopDrag()
+		local drag = self._drag
+		if drag then
+			self._drag = nil
+			drag.ghost:Destroy()
+			self.squares[drag.row][drag.col].piece.Visible = true
+		end
+	end
+
+	UserInputService.InputChanged:Connect(function(input)
+		local t = input.UserInputType
+		if t ~= Enum.UserInputType.MouseMovement and t ~= Enum.UserInputType.Touch then
+			return
+		end
+		if self._drag then
+			placeGhost()
+			return
+		end
+		local press = self._press
+		if not press then
+			return
+		end
+		local moved = (Vector2.new(input.Position.X, input.Position.Y) - press.at).Magnitude
+		if moved < DRAG_START then
+			return
+		end
+		local sq = self.squares[press.row][press.col]
+		if not (sq.code and sq.code ~= "" and self.canDrag and self.canDrag(press.row, press.col)) then
+			return
+		end
+		-- pick the piece up
+		local ghost = PieceArt.make(sq.code)
+		ghost.Name = "DraggedPiece"
+		ghost.AnchorPoint = Vector2.new(0.5, 0.5)
+		ghost.Size = UDim2.fromScale(0.86 / 8 * 1.1, 0.86 / 8 * 1.1) -- a touch bigger while held
+		ghost.ZIndex = 8
+		for _, d in ipairs(ghost:GetDescendants()) do
+			if d:IsA("GuiObject") then
+				d.ZIndex = 8
+			end
+		end
+		ghost.Parent = self.arrowLayer
+		self._drag = { row = press.row, col = press.col, ghost = ghost }
+		sq.piece.Visible = false
+		placeGhost()
+		self:clearArrows()
+		self:_fire("dragStart", press.row, press.col)
+	end)
+
+	UserInputService.InputEnded:Connect(function(input)
+		local t = input.UserInputType
+		if t == Enum.UserInputType.MouseButton1 or t == Enum.UserInputType.Touch then
+			local press, drag, over = self._press, self._drag, self._overSq
+			self._press = nil
+			if drag then
+				stopDrag()
+				-- dropped on another square: try to play the move there
+				if over and (over[1] ~= drag.row or over[2] ~= drag.col) then
+					self:_fire("square", over[1], over[2])
+				end
+			elseif press and over and over[1] == press.row and over[2] == press.col then
+				-- a plain click
+				self:clearArrows()
+				self:_fire("square", press.row, press.col)
+			end
+		elseif t == Enum.UserInputType.MouseButton2 then
+			local from, over = self._arrowFrom, self._overSq
+			self._arrowFrom = nil
+			if from and over and (from[1] ~= over[1] or from[2] ~= over[2]) then
+				self:_toggleArrow(from[1], from[2], over[1], over[2])
+			end
+		end
+	end)
 end
 
 function TabletView:clearArrows()
