@@ -123,11 +123,14 @@ function ChimeShared.roomSpawn(side: string): CFrame
 end
 
 -- the doorway: centre at floor level, width along world Z, facing the hall
+-- the roller-shutter picture on the front doors (assets/chime-shutter.png)
+ChimeShared.SHUTTER_TEXTURE = "rbxassetid://106935131448491"
+
 function ChimeShared.door(side: string): (CFrame, Vector3)
 	local d = ChimeShared.sign(side)
 	local s = ChimeShared.scale()
 	local base = ChimeShared.at(d * 27.6, 0, 0)
-	local height = 2.7 * s
+	local height = 5.75 * s -- the doorway goes all the way up to the ceiling
 	local size = Vector3.new(0.6, height, 6 * s)
 	return CFrame.new(base + Vector3.new(0, height / 2, 0)), size
 end

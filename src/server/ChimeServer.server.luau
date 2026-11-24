@@ -116,9 +116,18 @@ for _, side in ipairs({ "A", "B" }) do
 	door.Name = "Door" .. side
 	door.Anchored = true
 	door.CanCollide = false -- it stops robots by rule, not by physics
-	door.Material = Enum.Material.DiamondPlate
+	door.Material = Enum.Material.Metal
 	door.Color = Color3.fromRGB(70, 72, 80)
 	door.Size = size
+	-- a roller-shutter picture on both faces, stretched over the whole door
+	for _, face in ipairs({ Enum.NormalId.Left, Enum.NormalId.Right }) do
+		local tex = Instance.new("Texture")
+		tex.Face = face
+		tex.Texture = Shared.SHUTTER_TEXTURE
+		tex.StudsPerTileU = size.Z
+		tex.StudsPerTileV = size.Y
+		tex.Parent = door
+	end
 	local openCF = cf + Vector3.new(0, size.Y * 0.92, 0)
 	door.CFrame = openCF
 	local click = Instance.new("ClickDetector")
